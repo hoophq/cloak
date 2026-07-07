@@ -8,7 +8,6 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"net"
 	"os/exec"
 	"strings"
 	"testing"
@@ -27,16 +26,6 @@ const (
 	pgDB       = "e2edb"
 	pgPassword = "real-secret-do-not-leak"
 )
-
-func freePort(t *testing.T) int {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
-	return ln.Addr().(*net.TCPAddr).Port
-}
 
 // startPostgres launches a SCRAM-only postgres container and waits until it
 // accepts real-credential connections.

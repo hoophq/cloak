@@ -7,8 +7,10 @@ import (
 	"context"
 	"crypto/subtle"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"maps"
 	"net"
 	"slices"
@@ -30,7 +32,26 @@ const (
 
 type Connector struct{}
 
-func (Connector) HandleConn(ctx context.Context, client net.Conn, sess connector.Session) error {
+// Serve runs the accept loop; each client connection is brokered
+// independently.
+func (c Connector) Serve(ctx context.Context, ln net.Listener, sess connector.Session) error {
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return nil
+			}
+			return err
+		}
+		go func() {
+			if err := handleConn(ctx, conn, sess); err != nil {
+				slog.Error("session error", "upstream", sess.Upstream.Name, "err", err)
+			}
+		}()
+	}
+}
+
+func handleConn(ctx context.Context, client net.Conn, sess connector.Session) error {
 	defer client.Close()
 	_ = client.SetDeadline(time.Now().Add(handshakeTimeout))
 
@@ -141,7 +162,7 @@ func dialAndAuth(ctx context.Context, sess connector.Session, clientParams map[s
 		conn.Close()
 		return nil, err
 	}
-	if err := authenticate(conn, sess.Upstream.User, sess.Password); err != nil {
+	if err := authenticate(conn, sess.Upstream.User, sess.Credential); err != nil {
 		conn.Close()
 		return nil, err
 	}

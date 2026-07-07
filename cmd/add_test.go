@@ -3,12 +3,14 @@ package cmd
 import (
 	"strings"
 	"testing"
+
+	"github.com/hoophq/cloak/internal/config"
 )
 
 func withCleanAddFlags(t *testing.T) {
 	t.Helper()
 	saved := addFlags
-	addFlags.port = 5432 // flag default
+	addFlags.port = 0 // flag default; applyTypeDefaults fills per type
 	t.Cleanup(func() { addFlags = saved })
 }
 
@@ -28,11 +30,25 @@ func TestApplyURLDefaults(t *testing.T) {
 	if err := applyURL("postgresql://u@h"); err != nil {
 		t.Fatal(err)
 	}
-	if addFlags.port != 5432 {
-		t.Fatalf("port without URL port = %d, want default 5432", addFlags.port)
+	if addFlags.port != 0 {
+		t.Fatalf("port without URL port = %d, want 0 (filled by type defaults)", addFlags.port)
 	}
 	if addFlags.db != "" {
 		t.Fatalf("db without URL path = %q, want empty", addFlags.db)
+	}
+}
+
+func TestApplyTypeDefaults(t *testing.T) {
+	pg := config.Upstream{Name: "pg-prod", Type: config.TypePostgres}
+	applyTypeDefaults(&pg)
+	if pg.Port != 5432 || pg.Env != "CLOAK_PG_PROD_URL" || pg.EnvURL != "" {
+		t.Fatalf("postgres defaults = %+v", pg)
+	}
+
+	h := config.Upstream{Name: "openai", Type: config.TypeHTTP}
+	applyTypeDefaults(&h)
+	if h.Port != 443 || h.Env != "CLOAK_OPENAI_KEY" || h.EnvURL != "CLOAK_OPENAI_URL" {
+		t.Fatalf("http defaults = %+v", h)
 	}
 }
 
@@ -57,7 +73,7 @@ func TestDefaultEnvName(t *testing.T) {
 		"db.main":   "CLOAK_DB_MAIN_URL",
 		"analytics": "CLOAK_ANALYTICS_URL",
 	} {
-		if got := defaultEnvName(in); got != want {
+		if got := defaultEnvName(in, "URL"); got != want {
 			t.Errorf("defaultEnvName(%q) = %q, want %q", in, got, want)
 		}
 	}

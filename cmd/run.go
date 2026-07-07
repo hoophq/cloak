@@ -70,9 +70,14 @@ func runRun(cmd *cobra.Command, args []string) error {
 
 	env := os.Environ()
 	for _, r := range mgr.Runtimes {
+		assignments := r.EnvAssignments()
+		names := make([]string, len(assignments))
+		for i, kv := range assignments {
+			names[i], _, _ = strings.Cut(kv, "=")
+		}
 		fmt.Fprintf(os.Stderr, "cloak: %s → %s (127.0.0.1:%d)\n",
-			r.EnvVar(), r.Session.Upstream.Name, r.Session.Upstream.ListenPort)
-		env = append(env, r.EnvVar()+"="+r.FakeURL())
+			strings.Join(names, ", "), r.Session.Upstream.Name, r.Session.Upstream.ListenPort)
+		env = append(env, assignments...)
 	}
 
 	child := exec.Command(args[0], args[1:]...)

@@ -7,15 +7,22 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
 const (
 	TypePostgres = "postgres"
+	TypeHTTP     = "http"
 
 	TLSVerifyFull = "verify-full"
 	TLSDisable    = "disable"
+
+	// AuthBearer injects the credential as "Authorization: Bearer <secret>".
+	AuthBearer = "bearer"
+	// AuthHeaderPrefix selects a raw header, e.g. "header:x-api-key".
+	AuthHeaderPrefix = "header:"
 
 	// FirstListenPort is where automatic local port allocation starts.
 	FirstListenPort = 5433
@@ -27,10 +34,12 @@ type Upstream struct {
 	Type       string `yaml:"type"`
 	Host       string `yaml:"host"`
 	Port       int    `yaml:"port"`
-	Database   string `yaml:"database,omitempty"`
-	User       string `yaml:"user"`
+	Database   string `yaml:"database,omitempty"` // postgres only
+	User       string `yaml:"user,omitempty"`     // postgres only
+	Auth       string `yaml:"auth,omitempty"`     // http only: bearer | header:<name>
 	ListenPort int    `yaml:"listen_port"`
 	Env        string `yaml:"env,omitempty"`
+	EnvURL     string `yaml:"env_url,omitempty"` // http only: var for the local base URL
 	TLS        string `yaml:"tls"`
 }
 
@@ -51,9 +60,6 @@ func (u *Upstream) Validate() error {
 	if u.Name == "" {
 		return fmt.Errorf("upstream name is required")
 	}
-	if u.Type != TypePostgres {
-		return fmt.Errorf("upstream %q: unsupported type %q (only %q for now)", u.Name, u.Type, TypePostgres)
-	}
 	if u.Host == "" {
 		return fmt.Errorf("upstream %q: host is required", u.Name)
 	}
@@ -63,13 +69,37 @@ func (u *Upstream) Validate() error {
 	if u.ListenPort <= 0 || u.ListenPort > 65535 {
 		return fmt.Errorf("upstream %q: invalid listen port %d", u.Name, u.ListenPort)
 	}
-	if u.User == "" {
-		return fmt.Errorf("upstream %q: user is required", u.Name)
-	}
 	if u.TLS != TLSVerifyFull && u.TLS != TLSDisable {
 		return fmt.Errorf("upstream %q: tls must be %q or %q", u.Name, TLSVerifyFull, TLSDisable)
 	}
+	if u.Env == "" {
+		return fmt.Errorf("upstream %q: env is required (the var the fake credential is injected as)", u.Name)
+	}
+	switch u.Type {
+	case TypePostgres:
+		if u.User == "" {
+			return fmt.Errorf("upstream %q: user is required", u.Name)
+		}
+	case TypeHTTP:
+		if _, _, err := ParseAuth(u.Auth); err != nil {
+			return fmt.Errorf("upstream %q: %w", u.Name, err)
+		}
+	default:
+		return fmt.Errorf("upstream %q: unsupported type %q (%q or %q)", u.Name, u.Type, TypePostgres, TypeHTTP)
+	}
 	return nil
+}
+
+// ParseAuth resolves an http auth placement into the header to set and the
+// value prefix the credential is wrapped with.
+func ParseAuth(auth string) (header, prefix string, err error) {
+	if auth == AuthBearer {
+		return "Authorization", "Bearer ", nil
+	}
+	if name, ok := strings.CutPrefix(auth, AuthHeaderPrefix); ok && name != "" && !strings.ContainsAny(name, " \t:") {
+		return name, "", nil
+	}
+	return "", "", fmt.Errorf("auth must be %q or %q<name>, got %q", AuthBearer, AuthHeaderPrefix, auth)
 }
 
 type Config struct {

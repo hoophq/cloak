@@ -11,6 +11,7 @@ import (
 
 	"github.com/hoophq/cloak/internal/config"
 	"github.com/hoophq/cloak/internal/connector"
+	"github.com/hoophq/cloak/internal/connector/httpapi"
 	"github.com/hoophq/cloak/internal/connector/postgres"
 	"github.com/hoophq/cloak/internal/secret"
 	"github.com/hoophq/cloak/internal/token"
@@ -18,6 +19,7 @@ import (
 
 var connectors = map[string]connector.Connector{
 	config.TypePostgres: postgres.Connector{},
+	config.TypeHTTP:     httpapi.Connector{},
 }
 
 // Runtime is one upstream prepared for a session: real credential loaded,
@@ -46,9 +48,20 @@ func (r *Runtime) FakeURL() string {
 	return FakeDSN(r.Session.Upstream, r.Session.Token)
 }
 
-// EnvVar is the environment variable the fake DSN is injected as.
-func (r *Runtime) EnvVar() string {
-	return r.Session.Upstream.Env
+// EnvAssignments returns the NAME=VALUE pairs injected into the wrapped
+// command for this upstream. Every value is fake or loopback-local.
+func (r *Runtime) EnvAssignments() []string {
+	u := r.Session.Upstream
+	switch u.Type {
+	case config.TypeHTTP:
+		vars := []string{u.Env + "=" + connector.FakeKey(r.Session.Token)}
+		if u.EnvURL != "" {
+			vars = append(vars, fmt.Sprintf("%s=http://127.0.0.1:%d", u.EnvURL, u.ListenPort))
+		}
+		return vars
+	default:
+		return []string{u.Env + "=" + r.FakeURL()}
+	}
 }
 
 // Manager owns the listeners for one `cloak run` session.
@@ -73,7 +86,7 @@ func New(upstreams []config.Upstream, store secret.Store) (*Manager, error) {
 			return nil, err
 		}
 		m.Runtimes = append(m.Runtimes, &Runtime{
-			Session: connector.Session{Upstream: u, Password: pw, Token: tok},
+			Session: connector.Session{Upstream: u, Credential: pw, Token: tok},
 		})
 	}
 	return m, nil
@@ -101,16 +114,8 @@ func (m *Manager) serve(ctx context.Context, r *Runtime) {
 		slog.Error("no connector for type", "upstream", name, "type", r.Session.Upstream.Type)
 		return
 	}
-	for {
-		conn, err := r.ln.Accept()
-		if err != nil {
-			return // listener closed
-		}
-		go func() {
-			if err := c.HandleConn(ctx, conn, r.Session); err != nil {
-				slog.Error("session error", "upstream", name, "err", err)
-			}
-		}()
+	if err := c.Serve(ctx, r.ln, r.Session); err != nil {
+		slog.Error("listener error", "upstream", name, "err", err)
 	}
 }
 

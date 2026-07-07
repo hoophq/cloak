@@ -67,17 +67,63 @@ func TestValidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, mutate := range map[string]func(*Upstream){
-		"empty name": func(u *Upstream) { u.Name = "" },
-		"bad type":   func(u *Upstream) { u.Type = "mysql" },
-		"no host":    func(u *Upstream) { u.Host = "" },
-		"bad port":   func(u *Upstream) { u.Port = 0 },
-		"no user":    func(u *Upstream) { u.User = "" },
-		"bad tls":    func(u *Upstream) { u.TLS = "prefer" },
+		"empty name":   func(u *Upstream) { u.Name = "" },
+		"bad type":     func(u *Upstream) { u.Type = "mysql" },
+		"no host":      func(u *Upstream) { u.Host = "" },
+		"bad port":     func(u *Upstream) { u.Port = 0 },
+		"bad listen":   func(u *Upstream) { u.ListenPort = 0 },
+		"no env":       func(u *Upstream) { u.Env = "" },
+		"no user":      func(u *Upstream) { u.User = "" },
+		"bad tls":      func(u *Upstream) { u.TLS = "prefer" },
+		"http no auth": func(u *Upstream) { u.Type = TypeHTTP; u.User = ""; u.Auth = "" },
+		"http bad auth": func(u *Upstream) {
+			u.Type = TypeHTTP
+			u.User = ""
+			u.Auth = "cookie:sid"
+		},
 	} {
 		u := sample()
 		mutate(&u)
 		if err := u.Validate(); err == nil {
 			t.Errorf("%s: expected validation error", name)
+		}
+	}
+}
+
+func TestValidateHTTP(t *testing.T) {
+	base := Upstream{
+		Name: "openai", Type: TypeHTTP, Host: "api.openai.com", Port: 443,
+		ListenPort: 5434, Env: "OPENAI_API_KEY", EnvURL: "OPENAI_BASE_URL",
+		TLS: TLSVerifyFull,
+	}
+	for _, auth := range []string{"bearer", "header:x-api-key"} {
+		u := base
+		u.Auth = auth
+		if err := u.Validate(); err != nil {
+			t.Errorf("auth %q: unexpected error %v", auth, err)
+		}
+	}
+}
+
+func TestParseAuth(t *testing.T) {
+	cases := map[string]struct {
+		header, prefix string
+		wantErr        bool
+	}{
+		"bearer":           {"Authorization", "Bearer ", false},
+		"header:x-api-key": {"x-api-key", "", false},
+		"header:":          {"", "", true},
+		"basic":            {"", "", true},
+		"header:bad name":  {"", "", true},
+	}
+	for auth, want := range cases {
+		h, p, err := ParseAuth(auth)
+		if (err != nil) != want.wantErr {
+			t.Errorf("ParseAuth(%q) err = %v, wantErr %v", auth, err, want.wantErr)
+			continue
+		}
+		if err == nil && (h != want.header || p != want.prefix) {
+			t.Errorf("ParseAuth(%q) = (%q, %q), want (%q, %q)", auth, h, p, want.header, want.prefix)
 		}
 	}
 }

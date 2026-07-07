@@ -4,9 +4,13 @@ Hand your AI agent a fake credential; keep the real one out of its context.
 
 Cloak is a tiny local proxy. You register an upstream once — the real
 credential goes into your OS keychain — and run your agent through Cloak.
-The agent gets a fake DSN pointing at localhost, and Cloak swaps in the real
-credential on the way out. The real secret never enters the agent's context
-window, logs, or traces.
+The agent gets a fake DSN or API key pointing at localhost, and Cloak swaps
+in the real credential on the way out. The real secret never enters the
+agent's context window, logs, or traces.
+
+Works today for **PostgreSQL** databases and **HTTP APIs** (OpenAI,
+Anthropic, Stripe, GitHub, your internal services — anything that takes a
+bearer token or an API-key header).
 
 ```console
 $ cloak add pg-prod --url postgres://app_user@prod-db.internal:5432/app --env DATABASE_URL
@@ -26,15 +30,37 @@ DATABASE_URL=postgres://cloak:2db1db61ef5ad177@127.0.0.1:5433/app?sslmode=disabl
 That token is random, minted per `cloak run`, and useless from any other
 machine — or from the same machine once the session ends.
 
+For an HTTP API it looks the same, but the agent gets a fake key and a
+loopback base URL:
+
+```console
+$ cloak add openai --type http --host api.openai.com --auth bearer \
+    --env OPENAI_API_KEY --env-url OPENAI_BASE_URL
+Secret for api.openai.com: ****
+
+$ cloak run -- claude
+cloak: OPENAI_API_KEY, OPENAI_BASE_URL → openai (127.0.0.1:5434)
+```
+
+The SDK reads `OPENAI_BASE_URL=http://127.0.0.1:5434` and
+`OPENAI_API_KEY=cloak-<token>`; Cloak swaps in the real key and forwards to
+`https://api.openai.com`. For a header-based API use `--auth header:x-api-key`
+(e.g. Anthropic).
+
 ## How it works
 
-1. `cloak run` binds a loopback listener per upstream and injects fake DSNs
-   as environment variables into the command it wraps.
-2. The agent (or anything it spawns — `psql`, drivers, scripts) connects to
-   the listener and authenticates with the fake token.
-3. Cloak opens the real connection — TLS with full verification, then
-   SCRAM-SHA-256 / md5 / cleartext auth with the credential from the OS
-   keychain — and from then on splices bytes transparently.
+1. `cloak run` binds a loopback listener per upstream and injects the fake
+   DSN/key (and, for HTTP, a loopback base URL) as environment variables
+   into the command it wraps.
+2. The agent (or anything it spawns — `psql`, an SDK, `curl`, a script)
+   connects to the listener and presents the fake token.
+3. Cloak validates the token, then reaches the real upstream — TLS with full
+   verification — with the credential from the OS keychain:
+   - **Postgres:** SCRAM-SHA-256 / md5 / cleartext auth, then a transparent
+     byte splice for the rest of the session.
+   - **HTTP:** the real credential is injected into the configured header
+     (`Authorization: Bearer …` or a named header) and the request is
+     forwarded; streaming responses pass straight through.
 
 ## What it protects — and what it doesn't
 
@@ -76,8 +102,13 @@ are flagged so you know what still leaks.
 | `cloak run -- <cmd>` | Run a command with fake DSNs injected; proxy for the session |
 | `cloak rm <name>` | Remove an upstream and its keychain entry |
 
-Supported upstreams: PostgreSQL (SCRAM-SHA-256, md5, cleartext; TLS
-`verify-full` by default). More protocols are planned.
+Supported upstreams:
+
+- **PostgreSQL** — SCRAM-SHA-256, md5, cleartext; TLS `verify-full` by default.
+- **HTTP APIs** — bearer token or named header (`--auth bearer` /
+  `--auth header:<name>`); reverse-proxy on a loopback port.
+
+More protocols are planned.
 
 ## Development
 

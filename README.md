@@ -48,11 +48,30 @@ itself — the fake DSN is a live capability while the proxy runs. Pair Cloak
 with your agent's sandboxing and permission controls for that half. It is
 also not a defense against a hostile process with full local shell access.
 
+## Importing an existing .env
+
+A fake DSN next to a real one in `.env` protects nothing — the agent reads
+the file anyway. `cloak import` moves the real credential out:
+
+```console
+$ cloak import .env
+⚠ OPENAI_API_KEY (line 3): credential-shaped value; cloak cannot proxy this yet
+→ DATABASE_URL (line 2): upstream "database-url" on 127.0.0.1:5433, password moves to the OS keychain
+Rewrite .env? [y/N] y
+✓ imported 1 credential(s); .env rewritten (original backed up)
+```
+
+The entry keeps its variable name but now holds only a placeholder pointing
+at the cloak listener; the original file is backed up outside the project
+tree (`cloak import --undo .env` restores it). Values cloak can't proxy yet
+are flagged so you know what still leaks.
+
 ## Commands
 
 | Command | What it does |
 |---|---|
 | `cloak add <name>` | Register an upstream; password prompted, stored in the OS keychain |
+| `cloak import [file]` | Move credentials out of a .env file into cloak |
 | `cloak list` | Show registered upstreams (never credentials) |
 | `cloak run -- <cmd>` | Run a command with fake DSNs injected; proxy for the session |
 | `cloak rm <name>` | Remove an upstream and its keychain entry |

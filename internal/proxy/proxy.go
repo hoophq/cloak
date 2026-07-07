@@ -27,14 +27,23 @@ type Runtime struct {
 	ln      net.Listener
 }
 
-// FakeURL is the DSN handed to the agent. It contains only the fake
-// identity and the loopback address. The path segment is cosmetic — the
-// connector always routes to the configured database — so it carries the
-// cloak-local upstream name, never a real identifier.
-func (r *Runtime) FakeURL() string {
-	u := r.Session.Upstream
+// PlaceholderToken is the token `cloak import` writes into files. It can
+// never match a real session token, so a file-resident DSN fails closed at
+// the proxy instead of granting or leaking anything.
+const PlaceholderToken = "managed-by-cloak"
+
+// FakeDSN builds the loopback DSN for an upstream with the given token. It
+// contains only fake identity and the loopback address. The path segment is
+// cosmetic — the connector always routes to the configured database — so it
+// carries the cloak-local upstream name, never a real identifier.
+func FakeDSN(u config.Upstream, token string) string {
 	return fmt.Sprintf("postgres://%s:%s@127.0.0.1:%d/%s?sslmode=disable",
-		postgres.FakeUser, r.Session.Token, u.ListenPort, url.PathEscape(u.Name))
+		postgres.FakeUser, token, u.ListenPort, url.PathEscape(u.Name))
+}
+
+// FakeURL is the DSN handed to the agent for this session.
+func (r *Runtime) FakeURL() string {
+	return FakeDSN(r.Session.Upstream, r.Session.Token)
 }
 
 // EnvVar is the environment variable the fake DSN is injected as.

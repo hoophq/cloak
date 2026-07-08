@@ -64,8 +64,11 @@ func (Connector) Serve(ctx context.Context, ln net.Listener, sess connector.Sess
 	srv := &http.Server{
 		Handler: handler,
 		// The agent process is semi-untrusted; a slow-header client must not
-		// pin the listener open.
+		// pin the listener open, and idle keep-alive connections must not
+		// accumulate. No WriteTimeout: it would cut off long streaming (SSE)
+		// responses, which are a first-class case here.
 		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 	// The session ends when the manager closes the listener (Serve then
 	// returns net.ErrClosed); ctx cancellation is a backstop for callers

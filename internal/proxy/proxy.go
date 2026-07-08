@@ -101,7 +101,9 @@ func (m *Manager) Start(ctx context.Context) error {
 			m.Stop()
 			return fmt.Errorf("binding %s for %q: %w", addr, r.Session.Upstream.Name, err)
 		}
-		r.ln = ln
+		// Bound concurrent connections so a misbehaving local client cannot
+		// exhaust file descriptors or goroutines.
+		r.ln = newLimitListener(ln, maxConnsPerUpstream)
 		go m.serve(ctx, r)
 	}
 	return nil

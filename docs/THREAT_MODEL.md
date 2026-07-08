@@ -203,6 +203,13 @@ For readers who want to verify the guarantees rather than take them on faith:
   When it is used, the passphrase becomes the asset — protect it as you would
   the credential itself (a CI secret store is the right home). The OS keychain
   is the stronger default and is used whenever one is available.
+- **Native mode (`cloak init`) uses a stable token.** Claude Code's
+  settings.json is static, so the per-run random token becomes a fixed
+  per-machine one. It is still fake and loopback-only, and the session hooks
+  keep the proxy running only while a Claude session is open — but the token
+  string is reused across sessions rather than freshly minted each run. Use
+  `cloak run` when you want a fresh per-session token. Either way the real
+  credential never enters the agent's context, logs, or traces.
 
 ## In one sentence
 

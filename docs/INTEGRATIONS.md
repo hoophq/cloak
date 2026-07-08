@@ -25,12 +25,18 @@ Register your upstreams first (see the [README](../README.md#commands) for
 
 ## Claude Code
 
-Wrap the CLI. Everything Claude Code spawns — the Bash tool running `psql`,
-an SDK call, a `curl` — inherits the fake environment:
+The native way — wire cloak in once, then run `claude` normally:
 
 ```console
-$ cloak run -- claude
+$ cloak init        # adds fake credentials + session hooks to ~/.claude/settings.json
+$ claude            # cloak is on; no wrapper
 ```
+
+`cloak init` writes an `env` block (the fake DSN/key Claude Code applies to the
+session and everything the Bash tool spawns) plus `SessionStart`/`SessionEnd`
+hooks that run a small proxy while a session is open. It preserves your other
+settings; `cloak uninstall` removes exactly what it added. Use `cloak init
+--project` to scope it to `./.claude/settings.json` for one repo.
 
 Inside the session the agent sees only:
 
@@ -39,13 +45,14 @@ DATABASE_URL=postgres://cloak:2db1db61ef5ad177@127.0.0.1:5433/pg-prod?sslmode=di
 ```
 
 The real password is in your keychain; Cloak swaps it in on the way to the
-real database. This single command covers most agent workflows, because
-wrapping the top-level process covers every child it creates.
+real database.
 
-Serve just what a task needs:
+**Prefer no global config?** Wrap a single session instead — the same result,
+with a fresh per-run token, nothing written to settings:
 
 ```console
-$ cloak run --only pg-prod -- claude
+$ cloak run -- claude
+$ cloak run --only pg-prod -- claude   # serve just what a task needs
 ```
 
 ---

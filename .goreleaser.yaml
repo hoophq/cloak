@@ -1,0 +1,91 @@
+# GoReleaser config — cross-platform reproducible builds, checksums, keyless
+# cosign signatures, and a Homebrew formula pushed to hoophq/homebrew-tap.
+# Run locally with: goreleaser release --snapshot --clean --skip=publish,sign
+version: 2
+
+project_name: cloak
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: cloak
+    main: .
+    binary: cloak
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/hoophq/cloak/cmd.version={{ .Version }}
+      - -X github.com/hoophq/cloak/cmd.commit={{ .Commit }}
+      - -X github.com/hoophq/cloak/cmd.date={{ .CommitDate }}
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    # Reproducible builds: pin the binary's embedded timestamp to the commit.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: cloak
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+
+# Keyless signing (Sigstore) of the checksums file. No secrets: the CI job runs
+# with `id-token: write`, so cosign gets its identity from GitHub's OIDC.
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    output: true
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--yes"
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+
+homebrew_casks:
+  - name: cloak
+    repository:
+      owner: hoophq
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Casks
+    homepage: "https://github.com/hoophq/cloak"
+    description: "Hand AI agents fake credentials; keep the real ones out of their context"
+    # The binary is not yet Apple-notarized (tracked separately); strip the
+    # quarantine flag on install so Gatekeeper does not block first run.
+    hooks:
+      post:
+        install: |
+          if OS.mac? && File.exist?("#{staged_path}/cloak")
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/cloak"]
+          end
+
+release:
+  github:
+    owner: hoophq
+    name: cloak
+  prerelease: auto
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"

@@ -47,3 +47,13 @@ jobs:
       # (Docker is preinstalled on ubuntu-latest), so no service container here.
       - name: e2e tests
         run: go test -tags e2e -count=1 ./e2e/
+
+  release-check:
+    name: release config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: check

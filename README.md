@@ -12,6 +12,27 @@ Works today for **PostgreSQL** databases and **HTTP APIs** (OpenAI,
 Anthropic, Stripe, GitHub, your internal services — anything that takes a
 bearer token or an API-key header).
 
+## Install
+
+Homebrew (macOS):
+
+```console
+$ brew install hoophq/tap/cloak
+```
+
+Install script (macOS / Linux):
+
+```console
+$ curl -fsSL https://raw.githubusercontent.com/hoophq/cloak/main/install.sh | sh
+```
+
+Or grab a prebuilt binary from the [releases page](https://github.com/hoophq/cloak/releases).
+Every release ships checksummed, keyless-signed (Sigstore/cosign) `tar.gz`
+archives for macOS and Linux on amd64 and arm64. Build from source with
+`go install github.com/hoophq/cloak@latest` (Go 1.26+).
+
+## Quickstart
+
 ```console
 $ cloak add pg-prod --url postgres://app_user@prod-db.internal:5432/app --env DATABASE_URL
 Password for app_user@prod-db.internal: ****

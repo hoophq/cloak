@@ -104,11 +104,12 @@ func runHook(cmd *cobra.Command, args []string) error {
 	case "session-start":
 		if err := native.AddSession(id); err != nil {
 			fmt.Fprintf(os.Stderr, "cloak: %v\n", err)
-			return nil
 		}
 		if err := native.EnsureDaemon(); err != nil {
-			// Fail open: report, but do not block the session.
+			// Fail open (never block the session), but say so loudly: this
+			// session is running without cloak's protection.
 			fmt.Fprintf(os.Stderr, "cloak: %v\n", err)
+			systemMessage(cmd, "⚠️ cloak could not start its proxy — this session is NOT protected (see cloak's daemon log)")
 			return nil
 		}
 		emitBanner(cmd)
@@ -123,8 +124,15 @@ func runHook(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// emitBanner shows a one-line chat notice (like fence's) confirming cloak is
-// active, without adding anything to the model's context.
+// systemMessage emits a one-line chat notice (like fence's) to the user,
+// without adding anything to the model's context.
+func systemMessage(cmd *cobra.Command, msg string) {
+	_ = json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
+		SystemMessage string `json:"systemMessage"`
+	}{msg})
+}
+
+// emitBanner confirms cloak is active and names the upstreams it covers.
 func emitBanner(cmd *cobra.Command) {
 	cfg, _, err := loadConfig()
 	if err != nil || len(cfg.Upstreams) == 0 {
@@ -134,8 +142,5 @@ func emitBanner(cmd *cobra.Command) {
 	for i, u := range cfg.Upstreams {
 		names[i] = u.Name
 	}
-	msg := fmt.Sprintf("🔒 cloak is proxying %s — real credentials stay out of this session", strings.Join(names, ", "))
-	_ = json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
-		SystemMessage string `json:"systemMessage"`
-	}{msg})
+	systemMessage(cmd, fmt.Sprintf("🔒 cloak is proxying %s — real credentials stay out of this session", strings.Join(names, ", ")))
 }

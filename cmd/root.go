@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -15,6 +16,14 @@ var (
 
 	// store is swappable for tests.
 	store secret.Store = secret.Default()
+)
+
+// Build metadata, injected at release time via -ldflags (see .goreleaser.yaml).
+// The defaults are what a `go build`/`go install` from source reports.
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
 )
 
 var rootCmd = &cobra.Command{
@@ -34,6 +43,8 @@ func Execute() {
 }
 
 func init() {
+	rootCmd.Version = fmt.Sprintf("%s (commit %s, built %s)", version, commit, date)
+	rootCmd.SetVersionTemplate("cloak {{.Version}}\n")
 	rootCmd.PersistentFlags().StringVar(&flagConfig, "config", "", "config file (default $XDG_CONFIG_HOME/cloak/config.yaml)")
 }
 

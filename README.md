@@ -1,166 +1,112 @@
 # Cloak
 
-Hand your AI agent a fake credential; keep the real one out of its context.
+**Hand your AI agent a fake credential; keep the real one out of its context.**
 
-Cloak is a tiny local proxy. You register an upstream once — the real
-credential goes into your OS keychain — and run your agent through Cloak.
-The agent gets a fake DSN or API key pointing at localhost, and Cloak swaps
-in the real credential on the way out. The real secret never enters the
-agent's context window, logs, or traces.
+An agent that queries your database or calls an LLM API needs a real
+credential — and the moment it holds one, that secret is in its context
+window, its logs, its observability traces, and any shared session. Those are
+the places nobody rotates secrets out of.
 
-Works today for **PostgreSQL** databases and **HTTP APIs** (OpenAI,
-Anthropic, Stripe, GitHub, your internal services — anything that takes a
-bearer token or an API-key header).
+Cloak is a tiny local proxy. It hands the agent a **fake** DSN or API key
+pointing at `localhost` and swaps in the real one on the way out — over
+verified TLS, loaded from your OS keychain. The agent never sees it.
+
+Works today for **PostgreSQL** and **HTTP APIs** (OpenAI, Anthropic, and
+anything that takes a bearer token or an API-key header).
 
 ## Install
 
-Homebrew (macOS):
-
 ```console
-$ brew install hoophq/tap/cloak
+# macOS (Homebrew)
+brew install hoophq/tap/cloak
+
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/hoophq/cloak/main/install.sh | sh
 ```
 
-Install script (macOS / Linux):
+Or a signed binary from [releases](https://github.com/hoophq/cloak/releases),
+or `go install github.com/hoophq/cloak@latest` (Go 1.26+).
 
-```console
-$ curl -fsSL https://raw.githubusercontent.com/hoophq/cloak/main/install.sh | sh
-```
+## In a conversational session
 
-Or grab a prebuilt binary from the [releases page](https://github.com/hoophq/cloak/releases).
-Every release ships checksummed, keyless-signed (Sigstore/cosign) `tar.gz`
-archives for macOS and Linux on amd64 and arm64. Build from source with
-`go install github.com/hoophq/cloak@latest` (Go 1.26+).
-
-## Quickstart
+Register the upstream once, then run your agent through Cloak. Everything the
+agent spawns — a shell, `psql`, an SDK — inherits the fake credential.
 
 ```console
 $ cloak add pg-prod --url postgres://app_user@prod-db.internal:5432/app --env DATABASE_URL
 Password for app_user@prod-db.internal: ****
-✓ pg-prod registered (credential in OS keychain)
 
 $ cloak run -- claude
 cloak: DATABASE_URL → pg-prod (127.0.0.1:5433)
 ```
 
-Inside the session, the agent sees only:
+Inside the session the agent sees only a fake, loopback DSN:
 
 ```
 DATABASE_URL=postgres://cloak:2db1db61ef5ad177@127.0.0.1:5433/pg-prod?sslmode=disable
 ```
 
-That token is random, minted per `cloak run`, and useless from any other
-machine — or from the same machine once the session ends.
+Cloak validates the token and connects to the real database with the keychain
+credential. The token is random, minted per `cloak run`, and useless off-box
+or once the session ends.
 
-For an HTTP API it looks the same, but the agent gets a fake key and a
-loopback base URL:
+## In an application
+
+Same idea for an agentic backend (LangChain or any AI SDK). Register the
+provider, run your service under Cloak, and read the injected environment in
+code — the real API key never enters your app's process, logs, or LLM traces.
 
 ```console
 $ cloak add openai --type http --host api.openai.com --auth bearer \
     --env OPENAI_API_KEY --env-url OPENAI_BASE_URL
-Secret for api.openai.com: ****
 
-$ cloak run -- claude
+$ cloak run -- python -m myagent.server
 cloak: OPENAI_API_KEY, OPENAI_BASE_URL → openai (127.0.0.1:5434)
 ```
 
-The SDK reads `OPENAI_BASE_URL=http://127.0.0.1:5434` and
-`OPENAI_API_KEY=cloak-<token>`; Cloak swaps in the real key and forwards to
-`https://api.openai.com`. For a header-based API use `--auth header:x-api-key`
-(e.g. Anthropic).
+```python
+import os
+from langchain_openai import ChatOpenAI
 
-## How it works
+# Both values come from Cloak — the fake key and the loopback URL.
+llm = ChatOpenAI(
+    model="gpt-4o",
+    base_url=os.environ["OPENAI_BASE_URL"],  # http://127.0.0.1:5434
+    api_key=os.environ["OPENAI_API_KEY"],    # cloak-<token>
+)
+```
 
-1. `cloak run` binds a loopback listener per upstream and injects the fake
-   DSN/key (and, for HTTP, a loopback base URL) as environment variables
-   into the command it wraps.
-2. The agent (or anything it spawns — `psql`, an SDK, `curl`, a script)
-   connects to the listener and presents the fake token.
-3. Cloak validates the token, then reaches the real upstream — TLS with full
-   verification — with the credential from the OS keychain:
-   - **Postgres:** SCRAM-SHA-256 / md5 / cleartext auth, then a transparent
-     byte splice for the rest of the session.
-   - **HTTP:** the real credential is injected into the configured header
-     (`Authorization: Bearer …` or a named header) and the request is
-     forwarded; streaming responses pass straight through.
+Cloak swaps in the real key and forwards to `https://api.openai.com`; streaming
+works unchanged. Anthropic and other API-key headers use `--auth
+header:x-api-key`. For containers, MCP servers, and the `CLOAK_SECRET_KEY`
+deploy pattern, see the [integration guide](docs/INTEGRATIONS.md).
 
 ## What it protects — and what it doesn't
 
-**Protects against:** the real credential leaking into the agent's context
-window, transcripts, LLM observability traces, shared sessions, shell
-history, and logs — the places nobody rotates secrets out of. A leaked fake
-DSN is worthless off-box and expires with the session.
+Cloak keeps the real credential out of the agent's context, logs, and traces,
+and a leaked fake credential is worthless off-box and dies with the session.
 
-**Does not protect against:** a prompt-injected agent *misusing* the access
-itself — the fake DSN is a live capability while the proxy runs. Pair Cloak
-with your agent's sandboxing and permission controls for that half. It is
-also not a defense against a hostile process with full local shell access.
-
-Cloak protects the *credential*, not the *access*. Read the full
-[threat model](docs/THREAT_MODEL.md) before you rely on it — the honesty is
-the point.
-
-## Importing an existing .env
-
-A fake DSN next to a real one in `.env` protects nothing — the agent reads
-the file anyway. `cloak import` moves the real credential out:
-
-```console
-$ cloak import .env
-⚠ OPENAI_API_KEY (line 3): credential-shaped value; cloak cannot proxy this yet
-→ DATABASE_URL (line 2): upstream "database-url" on 127.0.0.1:5433, password moves to the OS keychain
-Rewrite .env? [y/N] y
-✓ imported 1 credential(s); .env rewritten (original backed up)
-```
-
-The entry keeps its variable name but now holds only a placeholder pointing
-at the cloak listener; the original file is backed up outside the project
-tree (`cloak import --undo .env` restores it). Values cloak can't proxy yet
-are flagged so you know what still leaks.
-
-## Commands
-
-| Command | What it does |
-|---|---|
-| `cloak add <name>` | Register an upstream; password prompted, stored in the OS keychain |
-| `cloak import [file]` | Move credentials out of a .env file into cloak |
-| `cloak list` | Show registered upstreams (never credentials) |
-| `cloak run -- <cmd>` | Run a command with fake DSNs injected; proxy for the session |
-| `cloak rm <name>` | Remove an upstream and its keychain entry |
-
-Supported upstreams:
-
-- **PostgreSQL** — SCRAM-SHA-256, md5, cleartext; TLS `verify-full` by default.
-  Add `--socket` to serve on a unix-domain socket restricted to your user.
-- **HTTP APIs** — bearer token or named header (`--auth bearer` /
-  `--auth header:<name>`); reverse-proxy on a loopback port.
-
-More protocols are planned.
-
-## Headless and CI
-
-Cloak keeps real credentials in the OS keychain by default. On a headless host
-or CI runner where there is no keychain, set `CLOAK_SECRET_KEY` and Cloak
-stores them in an encrypted file instead (AES-256-GCM, key derived from that
-passphrase) — keep it in your CI secret store. Without a keychain and without
-`CLOAK_SECRET_KEY`, `cloak add` fails closed rather than writing a secret in
-the clear. See the [integration guide](docs/INTEGRATIONS.md#plain-scripts-cron-and-ci).
+It does **not** stop a prompt-injected agent from *misusing* the live access
+while the proxy runs — the fake credential is a working capability. Pair Cloak
+with your agent's sandboxing and permissions: **it protects the credential,
+not the access.** The [threat model](docs/THREAT_MODEL.md) is honest about the
+boundaries — read it before you rely on it.
 
 ## Docs
 
-- **[Integration guides](docs/INTEGRATIONS.md)** — Claude Code, MCP servers,
-  Cursor, and plain scripts, with verification steps and gotchas.
-- **[Threat model](docs/THREAT_MODEL.md)** — what Cloak protects, what it
-  doesn't, and the design choices that back the claims.
-- **[FAQ](docs/FAQ.md)** — why not env vars / a secrets manager, how it
-  differs from Agent Vault and Secretless, and whether the fake DSN is a
-  boundary (it isn't).
+- **[Integration guide](docs/INTEGRATIONS.md)** — Claude Code, MCP servers, agentic backends, CI.
+- **[Threat model](docs/THREAT_MODEL.md)** — what it protects, what it doesn't, and why.
+- **[FAQ](docs/FAQ.md)** — why not env vars or a secrets manager; how it differs from Agent Vault and Secretless.
+
+Other commands: `cloak list`, `cloak rm <name>`, and `cloak import <file>` to
+move credentials out of an existing `.env`. Run `cloak --help` for the rest.
 
 ## Development
 
 ```console
-make build   # build the cloak binary
+make build   # build the binary
 make test    # unit tests
-make e2e     # full broker path against real PostgreSQL (requires Docker)
+make e2e     # full broker path against real PostgreSQL (Docker)
 ```
 
 ## License

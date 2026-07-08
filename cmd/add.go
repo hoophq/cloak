@@ -27,6 +27,7 @@ var addFlags struct {
 	envURL        string
 	listenPort    int
 	tls           string
+	socket        bool
 	passwordStdin bool
 }
 
@@ -56,6 +57,7 @@ func init() {
 	f.StringVar(&addFlags.envURL, "env-url", "", "http: env var to inject the local base URL as")
 	f.IntVar(&addFlags.listenPort, "listen-port", 0, "local listener port (default: auto, starting at 5433)")
 	f.StringVar(&addFlags.tls, "tls", config.TLSVerifyFull, "upstream TLS mode: verify-full or disable (local dev only)")
+	f.BoolVar(&addFlags.socket, "socket", false, "postgres: serve on a unix-domain socket (restricted to your user by filesystem permissions) instead of loopback TCP")
 	f.BoolVar(&addFlags.passwordStdin, "password-stdin", false, "read the credential from stdin instead of prompting")
 	rootCmd.AddCommand(addCmd)
 }
@@ -86,6 +88,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		Port:       addFlags.port,
 		Database:   addFlags.db,
 		User:       addFlags.user,
+		Socket:     addFlags.socket,
 		Auth:       addFlags.auth,
 		ListenPort: listenPort,
 		Env:        addFlags.env,
@@ -123,9 +126,13 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		header, prefix, _ := config.ParseAuth(u.Auth)
 		tryIt = fmt.Sprintf("cloak run -- sh -c 'curl -H \"%s: %s$%s\" \"$%s/\"'", header, prefix, u.Env, u.EnvURL)
 	}
+	local := fmt.Sprintf("127.0.0.1:%d", listenPort)
+	if u.Socket {
+		local = fmt.Sprintf("unix socket (.s.PGSQL.%d), restricted to your user", listenPort)
+	}
 	fmt.Fprintf(cmd.OutOrStdout(),
-		"✓ %s registered (credential in %s)\n  local listener  127.0.0.1:%d\n  injected as     %s\n  try it          %s\n",
-		name, store.Backend(), listenPort, injected, tryIt)
+		"✓ %s registered (credential in %s)\n  local listener  %s\n  injected as     %s\n  try it          %s\n",
+		name, store.Backend(), local, injected, tryIt)
 	return nil
 }
 

@@ -130,6 +130,7 @@ are flagged so you know what still leaks.
 Supported upstreams:
 
 - **PostgreSQL** — SCRAM-SHA-256, md5, cleartext; TLS `verify-full` by default.
+  Add `--socket` to serve on a unix-domain socket restricted to your user.
 - **HTTP APIs** — bearer token or named header (`--auth bearer` /
   `--auth header:<name>`); reverse-proxy on a loopback port.
 

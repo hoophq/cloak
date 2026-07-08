@@ -62,14 +62,15 @@ func startPostgres(t *testing.T, ctx context.Context, port int) {
 	}
 }
 
-func startManager(t *testing.T, ctx context.Context, pgPort, listenPort int) *proxy.Manager {
+func startManager(t *testing.T, ctx context.Context, pgPort, listenPort int, socket bool) *proxy.Manager {
 	t.Helper()
 	mgr, err := proxy.New([]config.Upstream{{
 		Name: "pg-e2e", Type: config.TypePostgres,
 		Host: "127.0.0.1", Port: pgPort,
 		Database: pgDB, User: pgUser,
 		ListenPort: listenPort, Env: "DATABASE_URL",
-		TLS: config.TLSDisable, // the docker image has no TLS configured
+		Socket: socket,
+		TLS:    config.TLSDisable, // the docker image has no TLS configured
 	}}, secret.Mem{"pg-e2e": pgPassword})
 	if err != nil {
 		t.Fatal(err)
@@ -85,7 +86,7 @@ func TestBrokeredConnection(t *testing.T) {
 	ctx := context.Background()
 	pgPort, listenPort := freePort(t), freePort(t)
 	startPostgres(t, ctx, pgPort)
-	mgr := startManager(t, ctx, pgPort, listenPort)
+	mgr := startManager(t, ctx, pgPort, listenPort, false)
 
 	fakeDSN := mgr.Runtimes[0].FakeURL()
 	if strings.Contains(fakeDSN, pgPassword) || strings.Contains(fakeDSN, pgUser) {
@@ -122,7 +123,7 @@ func TestWrongTokenRejected(t *testing.T) {
 	ctx := context.Background()
 	pgPort, listenPort := freePort(t), freePort(t)
 	startPostgres(t, ctx, pgPort)
-	startManager(t, ctx, pgPort, listenPort)
+	startManager(t, ctx, pgPort, listenPort, false)
 
 	badDSN := fmt.Sprintf("postgres://cloak:wrong-token@127.0.0.1:%d/%s?sslmode=disable", listenPort, pgDB)
 	if _, err := pgx.Connect(ctx, badDSN); err == nil {
@@ -136,7 +137,7 @@ func TestRealUsernameStaysHidden(t *testing.T) {
 	ctx := context.Background()
 	pgPort, listenPort := freePort(t), freePort(t)
 	startPostgres(t, ctx, pgPort)
-	startManager(t, ctx, pgPort, listenPort)
+	startManager(t, ctx, pgPort, listenPort, false)
 
 	// Connecting as anyone but the fake user is refused, and the refusal
 	// must not reveal the real username.
@@ -147,5 +148,36 @@ func TestRealUsernameStaysHidden(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), pgPassword) {
 		t.Fatalf("error leaks the real password: %v", err)
+	}
+}
+
+// TestBrokeredConnectionUnixSocket exercises the full broker path when the
+// agent-facing listener is a unix domain socket instead of loopback TCP.
+func TestBrokeredConnectionUnixSocket(t *testing.T) {
+	ctx := context.Background()
+	pgPort, listenPort := freePort(t), freePort(t)
+	startPostgres(t, ctx, pgPort)
+	mgr := startManager(t, ctx, pgPort, listenPort, true)
+
+	fakeDSN := mgr.Runtimes[0].FakeURL()
+	if !strings.Contains(fakeDSN, "host=") {
+		t.Fatalf("socket fake DSN missing host param: %s", fakeDSN)
+	}
+	if strings.Contains(fakeDSN, pgPassword) || strings.Contains(fakeDSN, pgUser) {
+		t.Fatalf("fake DSN leaks real identity: %s", fakeDSN)
+	}
+
+	conn, err := pgx.Connect(ctx, fakeDSN)
+	if err != nil {
+		t.Fatalf("connecting via unix-socket fake DSN: %v", err)
+	}
+	defer conn.Close(ctx)
+
+	var who string
+	if err := conn.QueryRow(ctx, "select current_user").Scan(&who); err != nil {
+		t.Fatal(err)
+	}
+	if who != pgUser {
+		t.Fatalf("current_user = %q, want %q", who, pgUser)
 	}
 }

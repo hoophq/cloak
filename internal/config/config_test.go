@@ -105,6 +105,22 @@ func TestValidateHTTP(t *testing.T) {
 	}
 }
 
+func TestValidateSocket(t *testing.T) {
+	pg := sample()
+	pg.Socket = true
+	if err := pg.Validate(); err != nil {
+		t.Errorf("postgres socket should validate: %v", err)
+	}
+
+	h := sample()
+	h.Type = TypeHTTP
+	h.Auth = "bearer"
+	h.Socket = true
+	if err := h.Validate(); err == nil {
+		t.Error("socket mode on an http upstream should be rejected")
+	}
+}
+
 func TestParseAuth(t *testing.T) {
 	cases := map[string]struct {
 		header, prefix string

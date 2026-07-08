@@ -171,13 +171,14 @@ For readers who want to verify the guarantees rather than take them on faith:
   (256 per upstream). The Postgres path enforces a handshake deadline and the
   HTTP path a header-read and idle timeout, so a misbehaving local client
   cannot pin connections open or exhaust file descriptors.
-- **No peer-UID/PID connection filtering — deliberately.** It is not portable
-  over loopback TCP (`SO_PEERCRED` is unix-socket-only, with no clean macOS
-  equivalent), and it would add little: the per-session token already gates
-  every connection, so a process that cannot read the token — any *other*
-  user's — cannot authenticate even though it can open the socket. Unix-domain
-  sockets, which would add filesystem-permission UID restriction for the
-  Postgres path, are tracked as a separate enhancement.
+- **Peer-UID enforcement via unix sockets (opt-in, Postgres).** Loopback TCP
+  cannot portably filter by peer UID (`SO_PEERCRED` is unix-socket-only, with
+  no clean macOS equivalent), and the per-session token already gates every
+  connection — a process that cannot read the token (any *other* user's)
+  cannot authenticate even though it can open the port. For the Postgres path
+  you can go further: `cloak add --socket` serves the upstream on a
+  unix-domain socket in a private `0700` directory (socket `0600`), so the
+  operating system itself restricts connections to your user.
 - **Constant-time token comparison** (`crypto/subtle`) on both the Postgres
   and HTTP paths, so a bad token cannot be recovered by timing.
 - **Upstream errors are reduced before relay.** Postgres upstream errors are

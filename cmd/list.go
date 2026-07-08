@@ -29,8 +29,12 @@ var listCmd = &cobra.Command{
 			if u.Type == config.TypeHTTP {
 				detail = u.Auth
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t127.0.0.1:%d\t%s\t%s\n",
-				u.Name, u.Type, u.Addr(), detail, u.ListenPort, u.Env, u.TLS)
+			local := fmt.Sprintf("127.0.0.1:%d", u.ListenPort)
+			if u.Socket {
+				local = fmt.Sprintf("unix/%d", u.ListenPort)
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				u.Name, u.Type, u.Addr(), detail, local, u.Env, u.TLS)
 		}
 		return w.Flush()
 	},

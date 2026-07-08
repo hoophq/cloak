@@ -36,6 +36,7 @@ type Upstream struct {
 	Port       int    `yaml:"port"`
 	Database   string `yaml:"database,omitempty"` // postgres only
 	User       string `yaml:"user,omitempty"`     // postgres only
+	Socket     bool   `yaml:"socket,omitempty"`   // postgres only: unix socket instead of loopback TCP
 	Auth       string `yaml:"auth,omitempty"`     // http only: bearer | header:<name>
 	ListenPort int    `yaml:"listen_port"`
 	Env        string `yaml:"env,omitempty"`
@@ -86,6 +87,9 @@ func (u *Upstream) Validate() error {
 		}
 	default:
 		return fmt.Errorf("upstream %q: unsupported type %q (%q or %q)", u.Name, u.Type, TypePostgres, TypeHTTP)
+	}
+	if u.Socket && u.Type != TypePostgres {
+		return fmt.Errorf("upstream %q: socket mode is postgres-only", u.Name)
 	}
 	return nil
 }

@@ -75,8 +75,12 @@ func runRun(cmd *cobra.Command, args []string) error {
 		for i, kv := range assignments {
 			names[i], _, _ = strings.Cut(kv, "=")
 		}
-		fmt.Fprintf(os.Stderr, "cloak: %s → %s (127.0.0.1:%d)\n",
-			strings.Join(names, ", "), r.Session.Upstream.Name, r.Session.Upstream.ListenPort)
+		loc := fmt.Sprintf("127.0.0.1:%d", r.Session.Upstream.ListenPort)
+		if r.Session.Upstream.Socket {
+			loc = fmt.Sprintf("unix/%d", r.Session.Upstream.ListenPort)
+		}
+		fmt.Fprintf(os.Stderr, "cloak: %s → %s (%s)\n",
+			strings.Join(names, ", "), r.Session.Upstream.Name, loc)
 		env = append(env, assignments...)
 	}
 

@@ -8,6 +8,9 @@ import (
 	"log/slog"
 	"net"
 	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
 
 	"github.com/hoophq/cloak/internal/config"
 	"github.com/hoophq/cloak/internal/connector"
@@ -27,6 +30,9 @@ var connectors = map[string]connector.Connector{
 type Runtime struct {
 	Session connector.Session
 	ln      net.Listener
+	// socketDir holds this upstream's unix socket when it uses socket mode;
+	// set at Start time and used to build the fake DSN.
+	socketDir string
 }
 
 // PlaceholderToken is the token `cloak import` writes into files. It can
@@ -45,7 +51,27 @@ func FakeDSN(u config.Upstream, token string) string {
 
 // FakeURL is the DSN handed to the agent for this session.
 func (r *Runtime) FakeURL() string {
+	if r.Session.Upstream.Socket {
+		return FakeSocketDSN(r.Session.Upstream, r.Session.Token, r.socketDir)
+	}
 	return FakeDSN(r.Session.Upstream, r.Session.Token)
+}
+
+// FakeSocketDSN builds the loopback DSN for a unix-socket upstream: the agent
+// connects through the socket in dir. Identity and database are fake or
+// cosmetic, exactly as in FakeDSN.
+func FakeSocketDSN(u config.Upstream, token, dir string) string {
+	q := url.Values{}
+	q.Set("host", dir)
+	q.Set("port", strconv.Itoa(u.ListenPort))
+	q.Set("sslmode", "disable")
+	fake := &url.URL{
+		Scheme:   "postgres",
+		User:     url.UserPassword(postgres.FakeUser, token),
+		Path:     "/" + u.Name,
+		RawQuery: q.Encode(),
+	}
+	return fake.String()
 }
 
 // EnvAssignments returns the NAME=VALUE pairs injected into the wrapped
@@ -67,6 +93,9 @@ func (r *Runtime) EnvAssignments() []string {
 // Manager owns the listeners for one `cloak run` session.
 type Manager struct {
 	Runtimes []*Runtime
+	// socketDir is the per-session directory holding unix sockets (0700),
+	// created lazily when an upstream uses socket mode.
+	socketDir string
 }
 
 // New loads credentials and mints a fresh token per upstream. It fails fast
@@ -92,20 +121,68 @@ func New(upstreams []config.Upstream, store secret.Store) (*Manager, error) {
 	return m, nil
 }
 
-// Start binds all listeners on loopback and begins serving.
+// Start binds all listeners and begins serving.
 func (m *Manager) Start(ctx context.Context) error {
 	for _, r := range m.Runtimes {
-		addr := fmt.Sprintf("127.0.0.1:%d", r.Session.Upstream.ListenPort)
-		ln, err := net.Listen("tcp", addr)
+		ln, err := m.listen(r)
 		if err != nil {
 			m.Stop()
-			return fmt.Errorf("binding %s for %q: %w", addr, r.Session.Upstream.Name, err)
+			return err
 		}
 		// Bound concurrent connections so a misbehaving local client cannot
 		// exhaust file descriptors or goroutines.
 		r.ln = newLimitListener(ln, maxConnsPerUpstream)
 		go m.serve(ctx, r)
 	}
+	return nil
+}
+
+// listen binds one runtime's local listener: loopback TCP by default, or a
+// unix-domain socket in a private 0700 directory when the upstream opts into
+// socket mode (so only this user can reach it).
+func (m *Manager) listen(r *Runtime) (net.Listener, error) {
+	u := r.Session.Upstream
+	if !u.Socket {
+		addr := fmt.Sprintf("127.0.0.1:%d", u.ListenPort)
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			return nil, fmt.Errorf("binding %s for %q: %w", addr, u.Name, err)
+		}
+		return ln, nil
+	}
+	if err := m.ensureSocketDir(); err != nil {
+		return nil, err
+	}
+	// libpq/pgx locate a unix socket as <host>/.s.PGSQL.<port>.
+	path := filepath.Join(m.socketDir, fmt.Sprintf(".s.PGSQL.%d", u.ListenPort))
+	if len(path) > 100 {
+		return nil, fmt.Errorf("unix socket path too long for %q (%d chars): %s", u.Name, len(path), path)
+	}
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, fmt.Errorf("binding unix socket for %q: %w", u.Name, err)
+	}
+	// The 0700 directory already restricts access to this user; tighten the
+	// socket itself to 0600 as defense in depth.
+	if err := os.Chmod(path, 0o600); err != nil {
+		_ = ln.Close()
+		return nil, err
+	}
+	r.socketDir = m.socketDir
+	return ln, nil
+}
+
+// ensureSocketDir lazily creates the per-session directory holding unix
+// sockets. os.MkdirTemp creates it 0700.
+func (m *Manager) ensureSocketDir() error {
+	if m.socketDir != "" {
+		return nil
+	}
+	dir, err := os.MkdirTemp("", "cloak")
+	if err != nil {
+		return fmt.Errorf("creating socket directory: %w", err)
+	}
+	m.socketDir = dir
 	return nil
 }
 
@@ -126,7 +203,10 @@ func (m *Manager) serve(ctx context.Context, r *Runtime) {
 func (m *Manager) Stop() {
 	for _, r := range m.Runtimes {
 		if r.ln != nil {
-			_ = r.ln.Close()
+			_ = r.ln.Close() // closing a unix listener unlinks its socket file
 		}
+	}
+	if m.socketDir != "" {
+		_ = os.RemoveAll(m.socketDir)
 	}
 }

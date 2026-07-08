@@ -77,16 +77,26 @@ func FakeSocketDSN(u config.Upstream, token, dir string) string {
 // EnvAssignments returns the NAME=VALUE pairs injected into the wrapped
 // command for this upstream. Every value is fake or loopback-local.
 func (r *Runtime) EnvAssignments() []string {
-	u := r.Session.Upstream
+	return EnvAssignments(r.Session.Upstream, r.Session.Token, r.socketDir)
+}
+
+// EnvAssignments computes the injected env for one upstream given a session
+// token (and, for socket-mode postgres, the socket directory). It backs both
+// the Runtime method and `cloak init`, which writes these values into Claude
+// Code's settings.json before the daemon runs.
+func EnvAssignments(u config.Upstream, token, socketDir string) []string {
 	switch u.Type {
 	case config.TypeHTTP:
-		vars := []string{u.Env + "=" + connector.FakeKey(r.Session.Token)}
+		vars := []string{u.Env + "=" + connector.FakeKey(token)}
 		if u.EnvURL != "" {
 			vars = append(vars, fmt.Sprintf("%s=http://127.0.0.1:%d", u.EnvURL, u.ListenPort))
 		}
 		return vars
 	default:
-		return []string{u.Env + "=" + r.FakeURL()}
+		if u.Socket {
+			return []string{u.Env + "=" + FakeSocketDSN(u, token, socketDir)}
+		}
+		return []string{u.Env + "=" + FakeDSN(u, token)}
 	}
 }
 
@@ -98,9 +108,26 @@ type Manager struct {
 	socketDir string
 }
 
-// New loads credentials and mints a fresh token per upstream. It fails fast
-// (before any listener binds) if a credential is missing.
+// New loads credentials and mints a fresh random token per upstream. It fails
+// fast (before any listener binds) if a credential is missing.
 func New(upstreams []config.Upstream, store secret.Store) (*Manager, error) {
+	return newManager(upstreams, store, "")
+}
+
+// NewFixed is like New but uses one stable token for every upstream and a
+// deterministic socket directory — the mode the background daemon (behind
+// `cloak init`) runs in, where the fake DSNs must match the values already
+// written into Claude Code's settings.json.
+func NewFixed(upstreams []config.Upstream, store secret.Store, tok, socketDir string) (*Manager, error) {
+	m, err := newManager(upstreams, store, tok)
+	if err != nil {
+		return nil, err
+	}
+	m.socketDir = socketDir
+	return m, nil
+}
+
+func newManager(upstreams []config.Upstream, store secret.Store, fixedToken string) (*Manager, error) {
 	m := &Manager{}
 	for _, u := range upstreams {
 		if err := u.Validate(); err != nil {
@@ -110,9 +137,12 @@ func New(upstreams []config.Upstream, store secret.Store) (*Manager, error) {
 		if err != nil {
 			return nil, err
 		}
-		tok, err := token.New()
-		if err != nil {
-			return nil, err
+		tok := fixedToken
+		if tok == "" {
+			var err error
+			if tok, err = token.New(); err != nil {
+				return nil, err
+			}
 		}
 		m.Runtimes = append(m.Runtimes, &Runtime{
 			Session: connector.Session{Upstream: u, Credential: pw, Token: tok},
@@ -175,8 +205,10 @@ func (m *Manager) listen(r *Runtime) (net.Listener, error) {
 // ensureSocketDir lazily creates the per-session directory holding unix
 // sockets. os.MkdirTemp creates it 0700.
 func (m *Manager) ensureSocketDir() error {
+	// A deterministic directory (set by NewFixed for the daemon) must exist and
+	// be private; otherwise mint a fresh per-session temp dir (0700).
 	if m.socketDir != "" {
-		return nil
+		return os.MkdirAll(m.socketDir, 0o700)
 	}
 	dir, err := os.MkdirTemp("", "cloak")
 	if err != nil {

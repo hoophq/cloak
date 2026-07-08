@@ -29,26 +29,30 @@ or `go install github.com/hoophq/cloak@latest` (Go 1.26+).
 
 ## In a conversational session
 
-Register the upstream once, then run your agent through Cloak. Everything the
-agent spawns — a shell, `psql`, an SDK — inherits the fake credential.
+Register the upstream once, wire cloak into Claude Code, then just run
+`claude` — no wrapper to remember.
 
 ```console
 $ cloak add pg-prod --url postgres://app_user@prod-db.internal:5432/app --env DATABASE_URL
 Password for app_user@prod-db.internal: ****
 
-$ cloak run -- claude
-cloak: DATABASE_URL → pg-prod (127.0.0.1:5433)
+$ cloak init        # adds the fake credentials + session hooks to ~/.claude/settings.json
+$ claude            # native — cloak is on, no `cloak run`
 ```
 
-Inside the session the agent sees only a fake, loopback DSN:
+Inside the session the agent — and everything it spawns (a shell, `psql`, an
+SDK) — sees only a fake, loopback DSN:
 
 ```
 DATABASE_URL=postgres://cloak:2db1db61ef5ad177@127.0.0.1:5433/pg-prod?sslmode=disable
 ```
 
 Cloak validates the token and connects to the real database with the keychain
-credential. The token is random, minted per `cloak run`, and useless off-box
-or once the session ends.
+credential. `cloak init` starts a small proxy when a session opens and stops it
+when the last one closes; `cloak uninstall` removes it cleanly.
+
+> No global config, or a one-off? `cloak run -- claude` does the same for a
+> single session (and mints a fresh per-run token) — handy for CI and scripts.
 
 ## In an application
 

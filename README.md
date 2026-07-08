@@ -24,7 +24,7 @@ cloak: DATABASE_URL → pg-prod (127.0.0.1:5433)
 Inside the session, the agent sees only:
 
 ```
-DATABASE_URL=postgres://cloak:2db1db61ef5ad177@127.0.0.1:5433/app?sslmode=disable
+DATABASE_URL=postgres://cloak:2db1db61ef5ad177@127.0.0.1:5433/pg-prod?sslmode=disable
 ```
 
 That token is random, minted per `cloak run`, and useless from any other
@@ -74,6 +74,10 @@ itself — the fake DSN is a live capability while the proxy runs. Pair Cloak
 with your agent's sandboxing and permission controls for that half. It is
 also not a defense against a hostile process with full local shell access.
 
+Cloak protects the *credential*, not the *access*. Read the full
+[threat model](docs/THREAT_MODEL.md) before you rely on it — the honesty is
+the point.
+
 ## Importing an existing .env
 
 A fake DSN next to a real one in `.env` protects nothing — the agent reads
@@ -109,6 +113,16 @@ Supported upstreams:
   `--auth header:<name>`); reverse-proxy on a loopback port.
 
 More protocols are planned.
+
+## Docs
+
+- **[Integration guides](docs/INTEGRATIONS.md)** — Claude Code, MCP servers,
+  Cursor, and plain scripts, with verification steps and gotchas.
+- **[Threat model](docs/THREAT_MODEL.md)** — what Cloak protects, what it
+  doesn't, and the design choices that back the claims.
+- **[FAQ](docs/FAQ.md)** — why not env vars / a secrets manager, how it
+  differs from Agent Vault and Secretless, and whether the fake DSN is a
+  boundary (it isn't).
 
 ## Development
 

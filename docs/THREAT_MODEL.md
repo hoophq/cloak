@@ -166,8 +166,18 @@ For readers who want to verify the guarantees rather than take them on faith:
   keychain *and* without `CLOAK_SECRET_KEY`, Cloak fails closed rather than
   writing a secret in the clear.
 - **Per-session tokens** are random and minted fresh on every `cloak run`.
-- **Loopback-only listeners.** Every listener binds `127.0.0.1`, never a
-  routable interface.
+- **Loopback-only listeners with bounded resources.** Every listener binds
+  `127.0.0.1`, never a routable interface, and caps concurrent connections
+  (256 per upstream). The Postgres path enforces a handshake deadline and the
+  HTTP path a header-read and idle timeout, so a misbehaving local client
+  cannot pin connections open or exhaust file descriptors.
+- **No peer-UID/PID connection filtering — deliberately.** It is not portable
+  over loopback TCP (`SO_PEERCRED` is unix-socket-only, with no clean macOS
+  equivalent), and it would add little: the per-session token already gates
+  every connection, so a process that cannot read the token — any *other*
+  user's — cannot authenticate even though it can open the socket. Unix-domain
+  sockets, which would add filesystem-permission UID restriction for the
+  Postgres path, are tracked as a separate enhancement.
 - **Constant-time token comparison** (`crypto/subtle`) on both the Postgres
   and HTTP paths, so a bad token cannot be recovered by timing.
 - **Upstream errors are reduced before relay.** Postgres upstream errors are

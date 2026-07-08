@@ -1,10 +1,12 @@
 // Package secret stores real credentials. The default backend is the OS
-// keychain; nothing in this package ever writes a secret to disk or to logs.
+// keychain; a passphrase-encrypted file backend ([File]) is the fallback for
+// headless hosts. A secret is never written to disk in plaintext, nor to logs.
 package secret
 
 import (
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/zalando/go-keyring"
 )
@@ -19,14 +21,30 @@ type Store interface {
 	Set(name, value string) error
 	Get(name string) (string, error)
 	Delete(name string) error
+	// Backend names where credentials are kept, for user-facing messages.
+	Backend() string
+}
+
+// Default selects the backend: the encrypted-file backend when EnvSecretKey is
+// set (the headless / CI opt-in), otherwise the OS keychain.
+func Default() Store {
+	if key := os.Getenv(EnvSecretKey); key != "" {
+		return NewFile(key)
+	}
+	return Keyring{}
 }
 
 // Keyring stores credentials in the OS keychain (macOS Keychain, Linux
 // secret-service, Windows credential manager).
 type Keyring struct{}
 
+func (Keyring) Backend() string { return "OS keychain" }
+
 func (Keyring) Set(name, value string) error {
-	return keyring.Set(service, name, value)
+	if err := keyring.Set(service, name, value); err != nil {
+		return fmt.Errorf("%w (no OS keychain available? set %s to use the encrypted-file backend)", err, EnvSecretKey)
+	}
+	return nil
 }
 
 func (Keyring) Get(name string) (string, error) {
@@ -47,6 +65,8 @@ func (Keyring) Delete(name string) error {
 
 // Mem is an in-memory store for tests.
 type Mem map[string]string
+
+func (Mem) Backend() string { return "memory" }
 
 func (m Mem) Set(name, value string) error { m[name] = value; return nil }
 

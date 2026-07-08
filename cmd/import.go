@@ -23,11 +23,11 @@ var importCmd = &cobra.Command{
 	Use:   "import [file]",
 	Short: "Move credentials out of a .env file into cloak",
 	Long: `Scan a .env file (default: ./.env) for credentials. Postgres DSNs with
-embedded passwords are imported: the password moves to the OS keychain, an
-upstream is registered, and the file entry is rewritten to a placeholder
-that only works through cloak. Other credential-shaped values are reported
-so you know what still leaks. The original file is backed up outside the
-project tree first.`,
+embedded passwords are imported: the password moves into cloak's secret
+store, an upstream is registered, and the file entry is rewritten to a
+placeholder that only works through cloak. Other credential-shaped values are
+reported so you know what still leaks. The original file is backed up outside
+the project tree first.`,
 	Example: `  cloak import
   cloak import .env.production
   cloak import --undo .env`,
@@ -89,8 +89,8 @@ func runImport(cmd *cobra.Command, args []string) error {
 	}
 
 	for _, c := range cands {
-		fmt.Fprintf(out, "→ %s (line %d): upstream %q on 127.0.0.1:%d, password moves to the OS keychain\n",
-			c.Key, c.LineNo+1, c.Upstream.Name, c.Upstream.ListenPort)
+		fmt.Fprintf(out, "→ %s (line %d): upstream %q on 127.0.0.1:%d, password moves to the %s\n",
+			c.Key, c.LineNo+1, c.Upstream.Name, c.Upstream.ListenPort, store.Backend())
 	}
 	if !importFlags.yes {
 		if err := confirm(fmt.Sprintf("Rewrite %s?", path)); err != nil {
@@ -98,7 +98,7 @@ func runImport(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Keychain first — a config entry must never point at a missing secret.
+	// Store secrets first — a config entry must never point at a missing one.
 	var stored []string
 	for _, c := range cands {
 		if err := store.Set(c.Upstream.Name, c.Password); err != nil {
@@ -151,6 +151,6 @@ func undoImport(out io.Writer, path string) error {
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "✓ %s restored from backup\n  note: imported upstreams and keychain entries were kept — review with `cloak list`, remove with `cloak rm <name>`\n", path)
+	fmt.Fprintf(out, "✓ %s restored from backup\n  note: imported upstreams and their stored credentials were kept — review with `cloak list`, remove with `cloak rm <name>`\n", path)
 	return nil
 }

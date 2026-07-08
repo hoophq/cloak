@@ -158,6 +158,13 @@ For readers who want to verify the guarantees rather than take them on faith:
   The on-disk config contains no secrets, and credentials are never passed on
   the command line (`cloak add` rejects passwords in `--url` and prompts on
   the TTY instead).
+- **On hosts with no keychain** (headless Linux, CI), setting
+  `CLOAK_SECRET_KEY` switches storage to an encrypted file: AES-256-GCM with a
+  key derived from that passphrase (PBKDF2-HMAC-SHA256, 600k iterations), the
+  entry name bound as the AEAD's additional data. The passphrase is never
+  written to disk; a stolen `secrets.enc` is opaque without it. Without a
+  keychain *and* without `CLOAK_SECRET_KEY`, Cloak fails closed rather than
+  writing a secret in the clear.
 - **Per-session tokens** are random and minted fresh on every `cloak run`.
 - **Loopback-only listeners.** Every listener binds `127.0.0.1`, never a
   routable interface.
@@ -181,6 +188,10 @@ For readers who want to verify the guarantees rather than take them on faith:
   bodies, but it is not an end-to-end-encrypted tunnel and is not designed to
   be blind to the data. Trust in the Cloak process is assumed (it is in the
   trusted zone above).
+- **The encrypted-file backend is only as strong as `CLOAK_SECRET_KEY`.**
+  When it is used, the passphrase becomes the asset — protect it as you would
+  the credential itself (a CI secret store is the right home). The OS keychain
+  is the stronger default and is used whenever one is available.
 
 ## In one sentence
 

@@ -91,6 +91,17 @@ macOS and Linux today, as a single static binary. Credentials are stored via
 the OS keychain (macOS Keychain, Linux Secret Service). Postgres and HTTP(S)
 upstreams are supported now; more protocols are planned.
 
+### How does this work on a headless server or in CI, where there's no keychain?
+
+Set `CLOAK_SECRET_KEY`. Its presence switches Cloak from the OS keychain to an
+encrypted-file backend (`$XDG_DATA_HOME/cloak/secrets.enc`): AES-256-GCM with
+the key derived from that passphrase via PBKDF2. Store `CLOAK_SECRET_KEY` in
+your CI secret store — it becomes the single value that unlocks the rest, so
+the file at rest is useless without it. If no keychain is available and
+`CLOAK_SECRET_KEY` is unset, `cloak add` fails closed instead of silently
+writing the secret in the clear. See the
+[threat model](THREAT_MODEL.md#design-choices-that-back-the-claims).
+
 ### Do I have to change my application or agent code?
 
 No, as long as it reads its credential from an environment variable — which

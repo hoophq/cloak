@@ -149,6 +149,21 @@ This is the one place a real secret touches a pipe rather than a prompt —
 keep it out of shell history (a leading space, a secret-manager fetch) and
 prefer the interactive prompt when a human is present.
 
+**Headless hosts and CI have no OS keychain.** Set `CLOAK_SECRET_KEY` and
+Cloak stores the credential in an encrypted file
+(`$XDG_DATA_HOME/cloak/secrets.enc`) instead, with the key derived from that
+passphrase. Keep `CLOAK_SECRET_KEY` in your CI secret store — it is the one
+value that unlocks the rest.
+
+```console
+$ export CLOAK_SECRET_KEY="$CI_CLOAK_PASSPHRASE"
+$ printf '%s' "$REAL_PASSWORD" | cloak add pg-prod --url … --env DATABASE_URL --password-stdin
+$ cloak run -- ./job.sh
+```
+
+Without a keychain *and* without `CLOAK_SECRET_KEY`, `cloak add` fails closed
+rather than writing the secret in the clear — that is deliberate.
+
 ---
 
 ## Verifying it worked

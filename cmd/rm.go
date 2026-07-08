@@ -8,7 +8,7 @@ import (
 
 var rmCmd = &cobra.Command{
 	Use:   "rm <name>",
-	Short: "Remove an upstream and its keychain credential",
+	Short: "Remove an upstream and its stored credential",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
@@ -20,7 +20,7 @@ var rmCmd = &cobra.Command{
 			return fmt.Errorf("no upstream named %q", name)
 		}
 		if err := store.Delete(name); err != nil {
-			return fmt.Errorf("removing keychain credential: %w", err)
+			return fmt.Errorf("removing stored credential: %w", err)
 		}
 		if err := cfg.Save(path); err != nil {
 			return err

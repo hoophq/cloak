@@ -105,9 +105,10 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("empty credential")
 	}
 
-	// Keychain first: if it fails, no config entry points at a missing secret.
+	// Store the secret first: if it fails, no config entry points at a
+	// missing secret.
 	if err := store.Set(name, password); err != nil {
-		return fmt.Errorf("storing credential in keychain: %w", err)
+		return fmt.Errorf("storing credential: %w", err)
 	}
 	cfg.Upstreams = append(cfg.Upstreams, u)
 	if err := cfg.Save(path); err != nil {
@@ -123,8 +124,8 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		tryIt = fmt.Sprintf("cloak run -- sh -c 'curl -H \"%s: %s$%s\" \"$%s/\"'", header, prefix, u.Env, u.EnvURL)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(),
-		"✓ %s registered (credential in OS keychain)\n  local listener  127.0.0.1:%d\n  injected as     %s\n  try it          %s\n",
-		name, listenPort, injected, tryIt)
+		"✓ %s registered (credential in %s)\n  local listener  127.0.0.1:%d\n  injected as     %s\n  try it          %s\n",
+		name, store.Backend(), listenPort, injected, tryIt)
 	return nil
 }
 

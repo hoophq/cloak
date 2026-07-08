@@ -114,6 +114,15 @@ Supported upstreams:
 
 More protocols are planned.
 
+## Headless and CI
+
+Cloak keeps real credentials in the OS keychain by default. On a headless host
+or CI runner where there is no keychain, set `CLOAK_SECRET_KEY` and Cloak
+stores them in an encrypted file instead (AES-256-GCM, key derived from that
+passphrase) — keep it in your CI secret store. Without a keychain and without
+`CLOAK_SECRET_KEY`, `cloak add` fails closed rather than writing a secret in
+the clear. See the [integration guide](docs/INTEGRATIONS.md#plain-scripts-cron-and-ci).
+
 ## Docs
 
 - **[Integration guides](docs/INTEGRATIONS.md)** — Claude Code, MCP servers,

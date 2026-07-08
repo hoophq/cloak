@@ -14,7 +14,7 @@ var (
 	flagConfig string
 
 	// store is swappable for tests.
-	store secret.Store = secret.Keyring{}
+	store secret.Store = secret.Default()
 )
 
 var rootCmd = &cobra.Command{

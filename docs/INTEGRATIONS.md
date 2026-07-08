@@ -166,6 +166,90 @@ rather than writing the secret in the clear — that is deliberate.
 
 ---
 
+## Agentic backends (LangChain and other LLM libraries)
+
+A backend that calls LLMs programmatically is a prime target: the provider API
+key sits in the same process that runs prompt-injectable models, third-party
+tools, and observability tracing — exactly where a key should not be. Cloak's
+HTTP connector keeps the real key out of it.
+
+It works because LLM SDKs let you override the base URL and read the key from
+an environment variable — the same knob used for Azure, gateways, and local
+models. Cloak injects a fake key and a loopback base URL; the SDK talks to
+Cloak; Cloak swaps in the real key and forwards to the provider over verified
+TLS (streaming passes straight through).
+
+Register each provider once:
+
+```console
+$ cloak add openai    --type http --host api.openai.com    --auth bearer          --env OPENAI_API_KEY    --env-url OPENAI_BASE_URL
+$ cloak add anthropic --type http --host api.anthropic.com --auth header:x-api-key --env ANTHROPIC_API_KEY --env-url ANTHROPIC_BASE_URL
+```
+
+Then run the backend under Cloak:
+
+```console
+$ cloak run -- python -m myagent.server
+cloak: OPENAI_API_KEY, OPENAI_BASE_URL → openai (127.0.0.1:5434)
+cloak: ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL → anthropic (127.0.0.1:5435)
+```
+
+LangChain, like most frameworks, delegates to the provider SDKs, so it
+inherits the same knob. The most robust wiring reads Cloak's injected values
+explicitly:
+
+```python
+import os
+from langchain_openai import ChatOpenAI
+
+llm = ChatOpenAI(
+    model="gpt-4o",
+    base_url=os.environ["OPENAI_BASE_URL"],  # http://127.0.0.1:5434 (from cloak)
+    api_key=os.environ["OPENAI_API_KEY"],    # cloak-<token>        (from cloak)
+)
+```
+
+If you pass nothing, the OpenAI SDK auto-reads `OPENAI_BASE_URL` /
+`OPENAI_API_KEY` and it still works. Point `--env-url` at whatever variable
+your library expects (some LangChain versions read `OPENAI_API_BASE`) — Cloak
+lets you name it.
+
+### Deploying it
+
+Cloak becomes the entrypoint that wraps your server:
+
+```dockerfile
+ENTRYPOINT ["cloak", "run", "--"]
+CMD ["python", "-m", "myagent.server"]
+```
+
+On a headless host the real keys live in Cloak's encrypted store, unlocked by
+`CLOAK_SECRET_KEY` (see [above](#plain-scripts-cron-and-ci)). That collapses
+your secret-zero to a single passphrase you inject through your orchestrator
+(a Kubernetes / ECS secret); the provider keys never enter the agent's
+environment, prompts, or traces.
+
+> **Honest note:** the real keys still have to be loaded into the store at
+> deploy time (an init step running `cloak add … --password-stdin`), so your
+> *pipeline* touches them. What Cloak buys you is that the **running agent** —
+> the part that can be prompt-injected or that logs request headers to
+> LangSmith / PostHog — only ever holds a fake `cloak-<token>`.
+
+### Limits
+
+- **Don't hardcode the base URL** in code (`base_url="https://api.openai.com"`)
+  — that overrides the injected variable. Read it from the environment.
+- **AWS Bedrock (SigV4) and GCP Vertex (OAuth) are not supported yet.** Their
+  auth signs the request against the real host, so a header swap cannot broker
+  them; a native signing connector is planned. Static bearer / api-key
+  providers (OpenAI, Anthropic, Groq, OpenRouter, Together, Mistral, most
+  gateways) work today.
+- **Host compromise still exposes the store and `CLOAK_SECRET_KEY`.** Cloak
+  narrows the blast radius to the agent, not the box — see the
+  [threat model](THREAT_MODEL.md#the-unprotected-cases-stated-plainly).
+
+---
+
 ## Verifying it worked
 
 Two quick checks:

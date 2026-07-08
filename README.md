@@ -143,4 +143,4 @@ make e2e     # full broker path against real PostgreSQL (requires Docker)
 
 ## License
 
-Apache-2.0
+MIT

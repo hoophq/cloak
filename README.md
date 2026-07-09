@@ -92,47 +92,56 @@ real key swapped in on the way out. Undo any time with `cloak uninstall`.
 
 ### B · Your own application
 
-Save this as `demo.py` (`pip install openai psycopg` first):
+Save this as `demo.py` (`pip install openai psycopg python-dotenv`):
 
 ```python
 import os, psycopg
+from dotenv import load_dotenv
 from openai import OpenAI
 
-# Both values come from the environment cloak populated — every one is fake.
-print("DB URL my code sees: ", os.environ["DATABASE_URL"])    # postgres://cloak:…@127.0.0.1, not the real host
-print("API key my code sees:", os.environ["OPENAI_API_KEY"])  # cloak-…, not the real key
+load_dotenv()   # your app already does this — now it loads cloak's fakes
 
-# The query still reaches your real database over verified TLS…
+# Every value the code sees is fake.
+print("DB URL: ", os.environ["DATABASE_URL"])     # postgres://cloak:…@127.0.0.1
+print("API key:", os.environ["OPENAI_API_KEY"])   # cloak-…
+
+# …yet the query still reaches your real database over verified TLS.
 with psycopg.connect(os.environ["DATABASE_URL"]) as db:
-    who = db.execute("select current_user").fetchone()[0]
-    print("…yet it runs as the real user:", who)
+    print("connected as:", db.execute("select current_user").fetchone()[0])
 
 # …and the API call still reaches OpenAI with your real key swapped in.
-reply = OpenAI().chat.completions.create(                     # OpenAI() reads the base URL + key cloak injected
+reply = OpenAI().chat.completions.create(
     model="gpt-4o-mini",
     messages=[{"role": "user", "content": "In 5 words: what is a credential proxy?"}],
 )
-print("…and the call still works:", reply.choices[0].message.content)
+print("openai says:", reply.choices[0].message.content)
 ```
 
-Run it through cloak:
+**Set it up once, then forget it.** Start cloak as a background service — it
+comes back at login — and run your app exactly the way you always have. No
+prefix, no wrapper, nothing to remember:
+
+```console
+$ cloak start          # once; cloak now runs in the background
+$ python demo.py
+DB URL:  postgres://cloak:5f3bd32…@127.0.0.1:5433/database-url?sslmode=disable
+API key: cloak-5f3bd32…
+connected as: app
+openai says: A local secret-swapping middleman.
+```
+
+That's the whole point: cloak runs without you noticing. Your code's
+environment holds only **fakes** — a loopback DSN and a `cloak-…` key — yet
+both the query and the request succeed, because cloak swapped in the real
+credentials over verified TLS. `cloak status` shows what's live; `cloak stop`
+tears it down.
+
+**Just need a one-off run?** Skip the background service and wrap a single
+command — cloak serves it for that run only, then exits:
 
 ```console
 $ cloak run -- python demo.py
-DB URL my code sees:  postgres://cloak:8f3a…@127.0.0.1:5433/database-url?sslmode=disable
-API key my code sees: cloak-8f3a1c9d2e...
-…yet it runs as the real user: app
-…and the call still works: A local secret-swapping middleman.
 ```
-
-Your code's environment holds **fakes** — a loopback DSN and a `cloak-…` key —
-yet both the query and the request succeed, because cloak swapped in the real
-credentials over verified TLS. No code change beyond what you'd write anyway.
-
-**Drop the `cloak run` prefix:** run `cloak start` once and cloak stays up as a
-background service (starting at login). Then `python demo.py` — and anything
-that reads a `.env` you've moved into cloak — just works. `cloak status` shows
-what's live; `cloak stop` removes it.
 
 > Using LangChain or another framework? It delegates to the same SDKs, so it
 > works the same way — see the [integration guide](docs/INTEGRATIONS.md) for

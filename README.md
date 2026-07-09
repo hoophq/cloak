@@ -27,63 +27,71 @@ curl -fsSL https://raw.githubusercontent.com/hoophq/cloak/main/install.sh | sh
 Or a signed binary from [releases](https://github.com/hoophq/cloak/releases),
 or `go install github.com/hoophq/cloak@latest` (Go 1.26+).
 
-## In a conversational session
+## Quickstart
 
-Register the upstream once, wire cloak into Claude Code, then just run
-`claude` — no wrapper to remember.
-
-```console
-$ cloak add pg-prod --url postgres://app_user@prod-db.internal:5432/app --env DATABASE_URL
-Password for app_user@prod-db.internal: ****
-
-$ cloak init        # adds the fake credentials + session hooks to ~/.claude/settings.json
-$ claude            # native — cloak is on, no `cloak run`
-```
-
-Inside the session the agent — and everything it spawns (a shell, `psql`, an
-SDK) — sees only a fake, loopback DSN:
-
-```
-DATABASE_URL=postgres://cloak:2db1db61ef5ad177@127.0.0.1:5433/pg-prod?sslmode=disable
-```
-
-Cloak validates the token and connects to the real database with the keychain
-credential. `cloak init` starts a small proxy when a session opens and stops it
-when the last one closes; `cloak uninstall` removes it cleanly.
-
-> No global config, or a one-off? `cloak run -- claude` does the same for a
-> single session (and mints a fresh per-run token) — handy for CI and scripts.
-
-## In an application
-
-Same idea for an agentic backend (LangChain or any AI SDK). Register the
-provider, run your service under Cloak, and read the injected environment in
-code — the real API key never enters your app's process, logs, or LLM traces.
+**Register a credential once.** We'll use an OpenAI key; paste your real key at
+the prompt — it goes straight to your OS keychain, never a file:
 
 ```console
 $ cloak add openai --type http --host api.openai.com --auth bearer \
     --env OPENAI_API_KEY --env-url OPENAI_BASE_URL
-
-$ cloak run -- python -m myagent.server
-cloak: OPENAI_API_KEY, OPENAI_BASE_URL → openai (127.0.0.1:5434)
+Secret for api.openai.com: ****
 ```
+
+Now pick your path.
+
+### A · A conversational agent (Claude Code)
+
+```console
+$ cloak init      # wire cloak into Claude Code — one time
+$ claude          # a 🔒 banner confirms cloak is on
+```
+
+**See it work:** ask the agent to print its own key —
+
+> print the value of `$OPENAI_API_KEY`
+
+It answers `cloak-…`, never your real key. Everything it spawns — a shell, an
+SDK, `curl` — sees the same fake, while requests still reach OpenAI with the
+real key swapped in on the way out. Undo any time with `cloak uninstall`.
+
+### B · Your own application
+
+Save this as `demo.py` (`pip install openai` first):
 
 ```python
 import os
-from langchain_openai import ChatOpenAI
+from openai import OpenAI
 
-# Both values come from Cloak — the fake key and the loopback URL.
-llm = ChatOpenAI(
-    model="gpt-4o",
-    base_url=os.environ["OPENAI_BASE_URL"],  # http://127.0.0.1:5434
-    api_key=os.environ["OPENAI_API_KEY"],    # cloak-<token>
+print("the key my code sees:", os.environ["OPENAI_API_KEY"])   # cloak-…, not the real one
+
+reply = OpenAI().chat.completions.create(                      # OpenAI() reads the env cloak injected
+    model="gpt-4o-mini",
+    messages=[{"role": "user", "content": "In 5 words: what is a credential proxy?"}],
 )
+print("…and the call still works:", reply.choices[0].message.content)
 ```
 
-Cloak swaps in the real key and forwards to `https://api.openai.com`; streaming
-works unchanged. Anthropic and other API-key headers use `--auth
-header:x-api-key`. For containers, MCP servers, and the `CLOAK_SECRET_KEY`
-deploy pattern, see the [integration guide](docs/INTEGRATIONS.md).
+Run it through cloak:
+
+```console
+$ cloak run -- python demo.py
+the key my code sees: cloak-8f3a1c9d2e...
+…and the call still works: A local secret-swapping middleman.
+```
+
+Your code's environment holds a **fake** key — yet the request succeeds,
+because cloak swapped in the real one over verified TLS. No code change beyond
+what you'd write anyway.
+
+**Drop the `cloak run` prefix:** run `cloak start` once and cloak stays up as a
+background service (starting at login). Then `python demo.py` — and anything
+that reads a `.env` you've moved into cloak — just works. `cloak status` shows
+what's live; `cloak stop` removes it.
+
+> Using LangChain or another framework? It delegates to the same SDKs, so it
+> works the same way — see the [integration guide](docs/INTEGRATIONS.md) for
+> LangChain, MCP servers, containers, and CI.
 
 ## What it protects — and what it doesn't
 

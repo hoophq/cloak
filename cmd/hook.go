@@ -115,6 +115,9 @@ func runHook(cmd *cobra.Command, args []string) error {
 		emitBanner(cmd)
 	case "session-end":
 		_ = native.RemoveSession(id)
+		if native.IsPersistent() {
+			return nil // an always-on daemon (cloak start) must outlive the session
+		}
 		if n, err := native.SessionCount(); err == nil && n == 0 {
 			_ = native.StopDaemon()
 		}

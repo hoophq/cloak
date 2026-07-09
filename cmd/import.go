@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/hoophq/cloak/internal/envimport"
+	"github.com/hoophq/cloak/internal/native"
 	"github.com/hoophq/cloak/internal/proxy"
 )
 
@@ -115,14 +116,18 @@ func runImport(cmd *cobra.Command, args []string) error {
 	if _, err := envimport.Backup(path); err != nil {
 		return fmt.Errorf("backing up %s: %w", path, err)
 	}
+	tok, err := native.Token()
+	if err != nil {
+		return err
+	}
 	newLines := envimport.Rewrite(lines, cands, func(c envimport.Candidate) string {
-		return proxy.FakeDSN(c.Upstream, proxy.PlaceholderToken)
+		return proxy.FakeDSN(c.Upstream, tok)
 	})
 	if err := os.WriteFile(path, []byte(strings.Join(newLines, "\n")), info.Mode().Perm()); err != nil {
 		return err
 	}
 
-	fmt.Fprintf(out, "✓ imported %d credential(s); %s rewritten (original backed up)\n  undo with   cloak import --undo %s\n  try it      cloak run -- <your agent>\n",
+	fmt.Fprintf(out, "✓ imported %d credential(s); %s rewritten (original backed up)\n  undo with     cloak import --undo %s\n  serve it      cloak start   (always-on; then run your app normally)\n",
 		len(cands), path, path)
 	return nil
 }

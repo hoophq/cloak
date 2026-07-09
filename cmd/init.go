@@ -37,9 +37,13 @@ var uninstallCmd = &cobra.Command{
 
 var stopCmd = &cobra.Command{
 	Use:   "stop",
-	Short: "Stop the cloak background proxy",
+	Short: "Stop the cloak background proxy (and any always-on service)",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		_ = native.ClearPersistent()
+		if err := native.UninstallService(); err != nil {
+			return err
+		}
 		_ = native.ClearSessions()
 		if err := native.StopDaemon(); err != nil {
 			return err

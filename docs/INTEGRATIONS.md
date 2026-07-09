@@ -144,6 +144,19 @@ $ cloak run -- ./nightly-report.sh
 $ cloak run --only stripe -- node ./reconcile.js
 ```
 
+Or run cloak as an always-on service and drop the prefix entirely:
+
+```console
+$ cloak start        # launchd (macOS) / systemd --user (Linux); starts at login
+$ python agent.py    # connects through the running daemon — no wrapper
+$ cloak status       # what's live   ·   cloak stop   # remove it
+```
+
+`cloak start` is also what makes a `cloak import`-rewritten `.env` work when the
+app is run normally: the daemon is the thing listening on the loopback port, so
+the working DSN in the file resolves. Without it, a rewritten `.env` only
+resolves under `cloak run` (which injects its own env).
+
 For non-interactive registration (no TTY to prompt on), pipe the secret in:
 
 ```console

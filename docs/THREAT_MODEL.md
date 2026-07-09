@@ -210,6 +210,13 @@ For readers who want to verify the guarantees rather than take them on faith:
   string is reused across sessions rather than freshly minted each run. Use
   `cloak run` when you want a fresh per-session token. Either way the real
   credential never enters the agent's context, logs, or traces.
+- **`cloak start` (always-on daemon) rewrites files with a working DSN.** With
+  the daemon running, `cloak import` writes a *working* loopback DSN into your
+  `.env` (the stable token) instead of a fail-closed placeholder, so an app run
+  normally connects through the daemon. That DSN is still fake and
+  loopback-only, resolves only while the daemon runs on this machine, and the
+  real credential stays in the keychain — but the file now holds a live fake
+  rather than an inert one.
 
 ## In one sentence
 

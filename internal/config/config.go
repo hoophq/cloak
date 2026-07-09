@@ -171,6 +171,18 @@ func (c *Config) Remove(name string) bool {
 	return false
 }
 
+// ListenPortOwner returns the name of the upstream bound to the given local
+// port, if any — used to reject a colliding --listen-port before it reaches
+// the daemon, where a double bind would fail.
+func (c *Config) ListenPortOwner(port int) (string, bool) {
+	for i := range c.Upstreams {
+		if c.Upstreams[i].ListenPort == port {
+			return c.Upstreams[i].Name, true
+		}
+	}
+	return "", false
+}
+
 // NextListenPort picks the next free local port slot, keeping assignments
 // stable across sessions (they are persisted in the config).
 func (c *Config) NextListenPort() int {

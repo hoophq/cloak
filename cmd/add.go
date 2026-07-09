@@ -81,6 +81,12 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	if listenPort == 0 {
 		listenPort = cfg.NextListenPort()
 	}
+	// A duplicate local port would fail to bind, and since the daemon reloads on
+	// add, a collision would take down every upstream it serves — not just this
+	// one. Reject it here, before it reaches the config.
+	if owner, taken := cfg.ListenPortOwner(listenPort); taken {
+		return fmt.Errorf("listen port %d is already used by upstream %q; choose another with --listen-port", listenPort, owner)
+	}
 	u := config.Upstream{
 		Name:       name,
 		Type:       addFlags.typ,
@@ -133,6 +139,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(cmd.OutOrStdout(),
 		"✓ %s registered (credential in %s)\n  local listener  %s\n  injected as     %s\n  try it          %s\n",
 		name, store.Backend(), local, injected, tryIt)
+	resyncAfterChange(cmd.OutOrStdout(), cfg)
 	return nil
 }
 

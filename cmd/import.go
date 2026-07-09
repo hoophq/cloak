@@ -129,6 +129,7 @@ func runImport(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(out, "✓ imported %d credential(s); %s rewritten (original backed up)\n  undo with     cloak import --undo %s\n  serve it      cloak start   (always-on; then run your app normally)\n",
 		len(cands), path, path)
+	resyncAfterChange(out, cfg)
 	return nil
 }
 

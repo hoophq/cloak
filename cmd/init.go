@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/hoophq/cloak/internal/claudecfg"
+	"github.com/hoophq/cloak/internal/config"
 	"github.com/hoophq/cloak/internal/native"
 	"github.com/hoophq/cloak/internal/proxy"
 )
@@ -85,20 +87,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	tok, err := native.Token()
+	env, err := managedEnv(cfg)
 	if err != nil {
 		return err
-	}
-	sockDir, err := native.SocketDir()
-	if err != nil {
-		return err
-	}
-	env := map[string]string{}
-	for _, u := range cfg.Upstreams {
-		for _, kv := range proxy.EnvAssignments(u, tok, sockDir) {
-			k, v, _ := strings.Cut(kv, "=")
-			env[k] = v
-		}
 	}
 
 	self, err := os.Executable()
@@ -137,4 +128,92 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 	_ = native.StopDaemon()
 	fmt.Fprintf(cmd.OutOrStdout(), "✓ cloak removed from Claude Code (%s); proxy stopped\n", path)
 	return nil
+}
+
+// managedEnv builds the fake env values cloak injects into Claude Code — one
+// entry per upstream variable (DSN, key, base URL) — using the stable daemon
+// token so the values match what the daemon serves.
+func managedEnv(cfg *config.Config) (map[string]string, error) {
+	tok, err := native.Token()
+	if err != nil {
+		return nil, err
+	}
+	sockDir, err := native.SocketDir()
+	if err != nil {
+		return nil, err
+	}
+	env := map[string]string{}
+	for _, u := range cfg.Upstreams {
+		for _, kv := range proxy.EnvAssignments(u, tok, sockDir) {
+			k, v, _ := strings.Cut(kv, "=")
+			env[k] = v
+		}
+	}
+	return env, nil
+}
+
+// syncClaude rewrites cloak's managed env + hooks into every settings.json that
+// already has the integration (the global file and, when present, the project
+// one), so a credential added after `cloak init` is picked up without a manual
+// re-init. Files where cloak was never installed are left untouched — this
+// never opts a user in. It returns the paths it refreshed.
+func syncClaude(cfg *config.Config) ([]string, error) {
+	if len(cfg.Upstreams) == 0 {
+		return nil, nil
+	}
+	env, err := managedEnv(cfg)
+	if err != nil {
+		return nil, err
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	var refreshed []string
+	seen := map[string]bool{}
+	for _, project := range []bool{false, true} {
+		path, err := settingsPath(project)
+		if err != nil {
+			return refreshed, err
+		}
+		if abs, err := filepath.Abs(path); err == nil {
+			if seen[abs] {
+				continue
+			}
+			seen[abs] = true
+		}
+		installed, err := claudecfg.Installed(path)
+		if err != nil {
+			return refreshed, err
+		}
+		if !installed {
+			continue
+		}
+		if _, _, err := claudecfg.Install(path, claudecfg.Managed{Env: env, HookCommand: self + " _hook"}); err != nil {
+			return refreshed, err
+		}
+		refreshed = append(refreshed, path)
+	}
+	return refreshed, nil
+}
+
+// resyncAfterChange propagates a just-registered credential to whatever is
+// already running, so the user need not re-run `cloak init` or restart the
+// daemon: it reloads a live daemon and refreshes any installed Claude Code
+// settings. Best-effort — it reports what it did and stays quiet when there is
+// nothing to do.
+func resyncAfterChange(out io.Writer, cfg *config.Config) {
+	if reloaded, err := native.ReloadDaemon(); err != nil {
+		fmt.Fprintf(out, "  ⚠ could not reload the running cloak daemon: %v\n", err)
+	} else if reloaded {
+		fmt.Fprintln(out, "  ↻ reloaded the running cloak daemon")
+	}
+	refreshed, err := syncClaude(cfg)
+	if err != nil {
+		fmt.Fprintf(out, "  ⚠ could not resync Claude Code settings: %v\n", err)
+		return
+	}
+	for _, p := range refreshed {
+		fmt.Fprintf(out, "  ↻ resynced Claude Code (%s)\n", p)
+	}
 }

@@ -71,6 +71,10 @@ func TestDaemonPIDNoneWhenAbsent(t *testing.T) {
 	if err := StopDaemon(); err != nil {
 		t.Fatal(err)
 	}
+	// ReloadDaemon likewise: nothing to signal, no error.
+	if reloaded, err := ReloadDaemon(); err != nil || reloaded {
+		t.Fatalf("ReloadDaemon with no daemon: reloaded=%v err=%v", reloaded, err)
+	}
 }
 
 func TestLockExcludesSecond(t *testing.T) {

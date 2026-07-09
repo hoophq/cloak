@@ -98,6 +98,13 @@ a prompt-injected agent from *misusing* the live access while the proxy runs —
 **it protects the credential, not the access.** Pair it with your agent's
 sandboxing. The [threat model](docs/THREAT_MODEL.md) is honest about the limits.
 
+Cloak is also **local self-protection**: one developer, one machine, your
+keychain. Need credentials brokered for a whole team — with access controls,
+approval workflows, and an audit trail no laptop can switch off? That's a
+different trust model, and it's what
+**[hoop.dev](https://hoop.dev/start?utm_source=cloak&utm_medium=github&utm_campaign=att-launch-072026)**
+does. Same idea, enforced at the gateway instead of on the laptop.
+
 ## Docs
 
 - **[Integration guide](docs/INTEGRATIONS.md)** — Claude Code, MCP servers, agentic backends, CI.
@@ -116,4 +123,4 @@ make e2e     # full broker path against real PostgreSQL (Docker)
 
 ## License
 
-MIT
+MIT © [hoop.dev](https://hoop.dev/?utm_source=cloak&utm_medium=github&utm_campaign=att-launch-072026) — built by the team behind hoop.

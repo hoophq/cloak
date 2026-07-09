@@ -82,8 +82,14 @@ llm = ChatOpenAI(
 
 Cloak swaps in the real key and forwards to `https://api.openai.com`; streaming
 works unchanged. Anthropic and other API-key headers use `--auth
-header:x-api-key`. For containers, MCP servers, and the `CLOAK_SECRET_KEY`
-deploy pattern, see the [integration guide](docs/INTEGRATIONS.md).
+header:x-api-key`.
+
+Don't want to prefix every run? `cloak start` runs cloak as an always-on
+background service (starting at login). Then `python -m myagent.server` — and
+anything that reads a `.env` you moved into cloak — just works, no wrapper.
+`cloak status` shows what's live; `cloak stop` removes it. For containers, MCP
+servers, and the `CLOAK_SECRET_KEY` deploy pattern, see the
+[integration guide](docs/INTEGRATIONS.md).
 
 ## What it protects — and what it doesn't
 

@@ -16,7 +16,7 @@ import (
 )
 
 // ManagedComment is written above each rewritten entry.
-const ManagedComment = "# managed by cloak — real credential in the OS keychain; run your agent via: cloak run -- <cmd>"
+const ManagedComment = "# managed by cloak — real credential in the OS keychain; run `cloak start` so this loopback DSN resolves"
 
 // Candidate is an importable entry: a postgres DSN with an embedded password.
 type Candidate struct {

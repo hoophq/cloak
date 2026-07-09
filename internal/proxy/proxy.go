@@ -35,11 +35,6 @@ type Runtime struct {
 	socketDir string
 }
 
-// PlaceholderToken is the token `cloak import` writes into files. It can
-// never match a real session token, so a file-resident DSN fails closed at
-// the proxy instead of granting or leaking anything.
-const PlaceholderToken = "managed-by-cloak"
-
 // FakeDSN builds the loopback DSN for an upstream with the given token. It
 // contains only fake identity and the loopback address. The path segment is
 // cosmetic — the connector always routes to the configured database — so it

@@ -51,6 +51,18 @@ func TestNextListenPort(t *testing.T) {
 	}
 }
 
+func TestListenPortOwner(t *testing.T) {
+	u := sample()
+	u.ListenPort = 5440
+	c := &Config{Upstreams: []Upstream{u}}
+	if owner, taken := c.ListenPortOwner(5440); !taken || owner != "pg-prod" {
+		t.Fatalf("owner of 5440 = %q,%v", owner, taken)
+	}
+	if _, taken := c.ListenPortOwner(5441); taken {
+		t.Fatal("5441 should be free")
+	}
+}
+
 func TestRemove(t *testing.T) {
 	c := &Config{Upstreams: []Upstream{sample()}}
 	if !c.Remove("pg-prod") {

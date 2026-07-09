@@ -32,6 +32,30 @@ func sampleManaged() Managed {
 	}
 }
 
+func TestInstalled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".claude", "settings.json")
+
+	// A missing file is not installed (and not an error).
+	if ok, err := Installed(path); err != nil || ok {
+		t.Fatalf("missing file: installed=%v err=%v", ok, err)
+	}
+
+	if _, _, err := Install(path, sampleManaged()); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := Installed(path); err != nil || !ok {
+		t.Fatalf("after install: installed=%v err=%v", ok, err)
+	}
+
+	// Uninstall removes cloak's hooks, so it reads as not installed again.
+	if err := Uninstall(path); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := Installed(path); err != nil || ok {
+		t.Fatalf("after uninstall: installed=%v err=%v", ok, err)
+	}
+}
+
 func TestInstallCreatesEnvAndHooks(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".claude", "settings.json")
 	managed, skipped, err := Install(path, sampleManaged())

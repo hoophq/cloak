@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -77,6 +78,27 @@ func Install(path string, m Managed) (managed, skipped []string, err error) {
 	sort.Strings(managed)
 	sort.Strings(skipped)
 	return managed, skipped, save(path, doc)
+}
+
+// Installed reports whether cloak's integration is present in the settings file
+// at path — i.e. `cloak init` has run against it. A missing file means not
+// installed, not an error. Callers use this to resync only the files a user
+// opted in, never to create one.
+func Installed(path string) (bool, error) {
+	doc, err := load(path)
+	if err != nil {
+		return false, err
+	}
+	hooks, err := decodeHooks(doc)
+	if err != nil {
+		return false, err
+	}
+	for _, groups := range hooks {
+		if slices.ContainsFunc(groups, isCloakGroup) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // Uninstall removes exactly cloak's hooks and the env keys it set (only where

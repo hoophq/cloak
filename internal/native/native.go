@@ -240,6 +240,20 @@ func StopDaemon() error {
 	return nil
 }
 
+// ReloadDaemon signals the running daemon to rebuild its listeners from the
+// current config (SIGHUP). It reports whether a daemon was there to signal; a
+// missing daemon is not an error — there is simply nothing to reload.
+func ReloadDaemon() (reloaded bool, err error) {
+	pid, ok := DaemonPID()
+	if !ok {
+		return false, nil
+	}
+	if err := syscall.Kill(pid, syscall.SIGHUP); err != nil && err != syscall.ESRCH {
+		return false, err
+	}
+	return true, nil
+}
+
 // Lock is held by the daemon for its lifetime, so only one daemon runs. ok is
 // false when another daemon already holds it (this one should exit quietly).
 func Lock() (release func(), ok bool, err error) {

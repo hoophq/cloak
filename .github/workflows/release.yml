@@ -19,6 +19,10 @@ jobs:
         with:
           go-version-file: go.mod
       - uses: sigstore/cosign-installer@v3
+        with:
+          # Pin cosign: the floating latest (v2.5.2) regressed the GitHub-Actions
+          # ambient-OIDC fetch used for keyless signing (ATR-94).
+          cosign-release: "v2.4.1"
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"

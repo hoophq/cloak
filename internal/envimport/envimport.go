@@ -13,18 +13,20 @@ import (
 	"time"
 
 	"github.com/hoophq/cloak/internal/config"
+	"github.com/hoophq/cloak/internal/connector"
 )
 
 // ManagedComment is written above each rewritten entry.
-const ManagedComment = "# managed by cloak — real credential in the OS keychain; run `cloak start` so this loopback DSN resolves"
+const ManagedComment = "# managed by cloak — real credential in cloak's secret store; run `cloak start` so this loopback endpoint resolves"
 
-// Candidate is an importable entry: a postgres DSN with an embedded password.
+// Candidate is an importable entry: a postgres DSN with an embedded password,
+// or a known-provider API key (OpenAI, Anthropic, ...).
 type Candidate struct {
 	LineNo   int // index into the file's lines
 	Key      string
 	Export   bool
 	Upstream config.Upstream // Name, ListenPort and Env are assigned by the caller
-	Password string
+	Secret   string          // the real credential moved to the keychain
 }
 
 // Warning flags a credential-shaped value cloak cannot import.
@@ -34,28 +36,90 @@ type Warning struct {
 	Reason string
 }
 
+// provider is a known HTTP API whose key cloak can broker: where to route the
+// request, how to attach the credential, and the base-URL env var its SDK reads.
+type provider struct {
+	host   string
+	auth   string // config.AuthBearer or config.AuthHeaderPrefix + <name>
+	envURL string
+}
+
+// providers maps a standard credential env-var name to its API. Recognition is
+// by env-var name only: an opaque key value carries no host, and a non-standard
+// name is exactly the case for `cloak add`.
+var providers = map[string]provider{
+	"OPENAI_API_KEY":    {host: "api.openai.com", auth: config.AuthBearer, envURL: "OPENAI_BASE_URL"},
+	"ANTHROPIC_API_KEY": {host: "api.anthropic.com", auth: config.AuthHeaderPrefix + "x-api-key", envURL: "ANTHROPIC_BASE_URL"},
+}
+
 // Scan classifies every entry of a .env file's lines.
 func Scan(lines []string) ([]Candidate, []Warning) {
+	present := presentKeys(lines)
 	var cands []Candidate
 	var warns []Warning
+	add := func(c *Candidate, w *Warning) {
+		if c != nil {
+			cands = append(cands, *c)
+		}
+		if w != nil {
+			warns = append(warns, *w)
+		}
+	}
 	for i, raw := range lines {
 		key, value, export, ok := parseLine(raw)
 		if !ok || value == "" {
 			continue
 		}
-		if strings.HasPrefix(value, "postgres://") || strings.HasPrefix(value, "postgresql://") {
-			c, w := classifyPostgres(i, key, export, value)
-			if c != nil {
-				cands = append(cands, *c)
-			}
-			if w != nil {
-				warns = append(warns, *w)
-			}
-		} else if looksLikeCredential(key, value) {
-			warns = append(warns, Warning{i, key, "credential-shaped value; cloak cannot proxy this yet"})
+		switch {
+		case strings.HasPrefix(value, "postgres://") || strings.HasPrefix(value, "postgresql://"):
+			add(classifyPostgres(i, key, export, value))
+		case isProvider(key):
+			add(classifyHTTP(i, key, export, value, present))
+		case looksLikeCredential(key, value):
+			warns = append(warns, Warning{i, key, "credential-shaped value; register it with `cloak add`"})
 		}
 	}
 	return cands, warns
+}
+
+func isProvider(key string) bool {
+	_, ok := providers[key]
+	return ok
+}
+
+// presentKeys collects the env keys the file already assigns, so classifyHTTP
+// can tell when a provider's base-URL var is already there. Empty assignments
+// count: adding a managed base-URL line next to an existing one would leave a
+// confusing duplicate, so we defer to `cloak add` instead.
+func presentKeys(lines []string) map[string]bool {
+	present := make(map[string]bool)
+	for _, raw := range lines {
+		if k, _, _, ok := parseLine(raw); ok {
+			present[k] = true
+		}
+	}
+	return present
+}
+
+// classifyHTTP turns a recognized provider key into an HTTP upstream candidate.
+func classifyHTTP(lineNo int, key string, export bool, value string, present map[string]bool) (*Candidate, *Warning) {
+	p := providers[key]
+	if strings.HasPrefix(value, connector.FakeKeyPrefix) {
+		return nil, nil // already a cloak placeholder
+	}
+	if present[p.envURL] {
+		// A base URL is already set: likely a custom endpoint (Azure, a gateway,
+		// self-hosted) whose host our registry would not match. Leave it for
+		// `cloak add`, which can take the real host.
+		return nil, &Warning{lineNo, key, p.envURL + " is already set (custom endpoint?); register with `cloak add` to keep it"}
+	}
+	return &Candidate{
+		LineNo: lineNo, Key: key, Export: export, Secret: value,
+		Upstream: config.Upstream{
+			Type: config.TypeHTTP, Host: p.host, Port: 443,
+			Auth: p.auth, EnvURL: p.envURL, TLS: config.TLSVerifyFull,
+		},
+	}, nil
 }
 
 func classifyPostgres(lineNo int, key string, export bool, value string) (*Candidate, *Warning) {
@@ -93,7 +157,7 @@ func classifyPostgres(lineNo int, key string, export bool, value string) (*Candi
 		tlsMode = config.TLSDisable
 	}
 	return &Candidate{
-		LineNo: lineNo, Key: key, Export: export, Password: pw,
+		LineNo: lineNo, Key: key, Export: export, Secret: pw,
 		Upstream: config.Upstream{
 			Type: config.TypePostgres, Host: host, Port: port,
 			Database: strings.TrimPrefix(u.Path, "/"),
@@ -162,13 +226,15 @@ func looksLikeCredential(key, value string) bool {
 }
 
 // Rewrite replaces each candidate's line with a managed comment plus the
-// placeholder value, leaving every other line untouched.
-func Rewrite(lines []string, cands []Candidate, placeholder func(Candidate) string) []string {
+// placeholder assignments, leaving every other line untouched. assign returns
+// the NAME=VALUE pairs for a candidate — one for a postgres DSN, two for an
+// HTTP key (the fake key and its loopback base URL).
+func Rewrite(lines []string, cands []Candidate, assign func(Candidate) []string) []string {
 	byLine := make(map[int]Candidate, len(cands))
 	for _, c := range cands {
 		byLine[c.LineNo] = c
 	}
-	out := make([]string, 0, len(lines)+len(cands))
+	out := make([]string, 0, len(lines)+2*len(cands))
 	for i, raw := range lines {
 		c, ok := byLine[i]
 		if !ok {
@@ -178,11 +244,12 @@ func Rewrite(lines []string, cands []Candidate, placeholder func(Candidate) stri
 		if len(out) == 0 || out[len(out)-1] != ManagedComment {
 			out = append(out, ManagedComment)
 		}
-		line := c.Key + "=" + placeholder(c)
-		if c.Export {
-			line = "export " + line
+		for _, kv := range assign(c) {
+			if c.Export {
+				kv = "export " + kv
+			}
+			out = append(out, kv)
 		}
-		out = append(out, line)
 	}
 	return out
 }

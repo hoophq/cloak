@@ -90,7 +90,7 @@ func runImport(cmd *cobra.Command, args []string) error {
 	}
 
 	for _, c := range cands {
-		fmt.Fprintf(out, "→ %s (line %d): upstream %q on 127.0.0.1:%d, password moves to the %s\n",
+		fmt.Fprintf(out, "→ %s (line %d): upstream %q on 127.0.0.1:%d, credential moves to the %s\n",
 			c.Key, c.LineNo+1, c.Upstream.Name, c.Upstream.ListenPort, store.Backend())
 	}
 	if !importFlags.yes {
@@ -102,7 +102,7 @@ func runImport(cmd *cobra.Command, args []string) error {
 	// Store secrets first — a config entry must never point at a missing one.
 	var stored []string
 	for _, c := range cands {
-		if err := store.Set(c.Upstream.Name, c.Password); err != nil {
+		if err := store.Set(c.Upstream.Name, c.Secret); err != nil {
 			for _, n := range stored {
 				_ = store.Delete(n)
 			}
@@ -120,8 +120,8 @@ func runImport(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	newLines := envimport.Rewrite(lines, cands, func(c envimport.Candidate) string {
-		return proxy.FakeDSN(c.Upstream, tok)
+	newLines := envimport.Rewrite(lines, cands, func(c envimport.Candidate) []string {
+		return proxy.EnvAssignments(c.Upstream, tok, "")
 	})
 	if err := os.WriteFile(path, []byte(strings.Join(newLines, "\n")), info.Mode().Perm()); err != nil {
 		return err

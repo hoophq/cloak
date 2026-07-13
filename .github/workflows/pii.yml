@@ -43,32 +43,48 @@ jobs:
         run: printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" > /tmp/pr-metadata.txt
 
       - name: scan PR title and body
-        uses: hoophq/alcatraz-action@v1
+        uses: hoophq/alcatraz-action@0ea580df1a2914b82e02a1eb40fb2fdebb6decd8 # v1
         with:
           mode: files
           paths: /tmp/pr-metadata.txt
           comment: false # the diff scan owns the sticky report
 
       - name: scan PR diff
-        uses: hoophq/alcatraz-action@v1
+        uses: hoophq/alcatraz-action@0ea580df1a2914b82e02a1eb40fb2fdebb6decd8 # v1
 
-  # Scan new/edited issue, comment, and review bodies. Report only — a red X
-  # on a conversation event blocks nothing, so failing would just add noise.
+  # Scan new/edited issue and comment bodies. Report only — a red X on a
+  # conversation event blocks nothing, so failing would just add noise.
   comment:
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'issues' || github.event_name == 'issue_comment'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
       issues: write
-      pull-requests: write # replies on PR comments too
+      pull-requests: write # issue_comment fires for PR comments too
     steps:
-      # mode: comment reads .comment.body / .issue.body, which also covers
-      # inline review comments; review bodies live at .review.body, which the
-      # action can't see — scan those as a file below.
       - name: scan comment body
-        if: github.event_name != 'pull_request_review'
-        uses: hoophq/alcatraz-action@v1
+        uses: hoophq/alcatraz-action@0ea580df1a2914b82e02a1eb40fb2fdebb6decd8 # v1
+        with:
+          mode: comment
+          fail-on-findings: false
+
+  # Scan review comments and review bodies, same report-only posture. Split
+  # from the comment job so review events don't carry issues: write.
+  review:
+    if: github.event_name == 'pull_request_review_comment' || github.event_name == 'pull_request_review'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write # sticky report on the PR
+    steps:
+      # Inline review comment payloads carry .comment.body, which mode: comment
+      # reads; review bodies live at .review.body, which the action can't see —
+      # scan those as a file instead.
+      - name: scan review comment body
+        if: github.event_name == 'pull_request_review_comment'
+        uses: hoophq/alcatraz-action@0ea580df1a2914b82e02a1eb40fb2fdebb6decd8 # v1
         with:
           mode: comment
           fail-on-findings: false
@@ -81,7 +97,7 @@ jobs:
 
       - name: scan review body
         if: github.event_name == 'pull_request_review'
-        uses: hoophq/alcatraz-action@v1
+        uses: hoophq/alcatraz-action@0ea580df1a2914b82e02a1eb40fb2fdebb6decd8 # v1
         with:
           mode: files
           paths: /tmp/review-body.txt

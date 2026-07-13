@@ -33,7 +33,18 @@ jobs:
       - name: build
         run: go build ./...
       - name: unit tests
-        run: go test ./...
+        # Explicit bash => pipefail, so tee can't mask a test failure.
+        shell: bash
+        run: go test -v ./... 2>&1 | tee /tmp/test-output.log
+
+      - name: PII scan of test output
+        # Failing runs are the likeliest to leak PII, so scan even then.
+        if: always()
+        uses: hoophq/alcatraz-action@0ea580df1a2914b82e02a1eb40fb2fdebb6decd8 # v1
+        with:
+          mode: files
+          paths: /tmp/test-output.log
+          comment: false # step summary only; keeps this workflow contents:read
 
   e2e:
     name: e2e (postgres)
@@ -46,7 +57,18 @@ jobs:
       # The e2e test provisions its own postgres:16-alpine via `docker run`
       # (Docker is preinstalled on ubuntu-latest), so no service container here.
       - name: e2e tests
-        run: go test -tags e2e -count=1 ./e2e/
+        # Explicit bash => pipefail, so tee can't mask a test failure.
+        shell: bash
+        run: go test -v -tags e2e -count=1 ./e2e/ 2>&1 | tee /tmp/e2e-output.log
+
+      - name: PII scan of e2e output
+        # Failing runs are the likeliest to leak PII, so scan even then.
+        if: always()
+        uses: hoophq/alcatraz-action@0ea580df1a2914b82e02a1eb40fb2fdebb6decd8 # v1
+        with:
+          mode: files
+          paths: /tmp/e2e-output.log
+          comment: false # step summary only; keeps this workflow contents:read
 
   release-check:
     name: release config
